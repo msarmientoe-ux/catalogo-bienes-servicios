@@ -1,1 +1,1877 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  CATÁLOGO DE BIENES Y SERVICIOS
+  ============================================================================
+  Autor     : MSarmiento (msarmientoe@gmail.com)
+  Versión   : 1.0.0
+  Fecha     : 2026
+  Licencia  : Todo público
 
+  Descripción
+  -----------
+  Aplicación web de página única (SPA) para consulta, comparación y
+  administración de un catálogo de bienes y servicios construido a partir
+  de compras históricas del Estado panameño (PanamáCompraEnCifras).
+
+  Stack técnico
+  -------------
+  - Tailwind CSS (CDN)         → estilos
+  - Supabase JS v2 (CDN)       → base de datos y autenticación
+  - Chart.js v4 (CDN)          → gráficas del tablero
+  - jsPDF + AutoTable (CDN)    → exportación a PDF
+  - SheetJS/XLSX (CDN)         → exportación a Excel
+  - Lucide (CDN)               → iconografía
+
+  Estructura de la aplicación
+  ---------------------------
+  El archivo es autocontenido: contiene HTML, CSS y JS en un solo documento.
+  Las secciones principales están comentadas en el código con separadores
+  del tipo "/* ===== NOMBRE SECCIÓN ===== */".
+
+  Orden de las secciones JS:
+    1. CONFIGURACIÓN           → constantes de Supabase
+    2. UTILIDADES              → helpers (esc, money, toast, ...)
+    3. TEMA / SIDEBAR          → modo claro/oscuro, menú lateral
+    4. LOGIN                   → autenticación y traducción de errores
+    5. NAVEGACIÓN              → cambio de vistas
+    6. TABLAS DE REFERENCIA    → unidades, objeto del gasto
+    7. DASHBOARD               → KPIs, tendencia, volatilidad
+    8. FILTROS / CATÁLOGO      → consulta principal
+    9. DETALLE / COPIAR        → ficha individual
+   10. CRUD                    → crear, editar, borrar
+   11. EXPORTACIONES           → CSV, Excel, PDF
+   12. COMPARACIÓN             → comparador de ítems
+   13. ADMINISTRACIÓN          → usuarios y roles
+   14. CARGA MASIVA            → previsualización de importación
+   15. MODALES PROPIOS         → motivo de baja, confirmación
+   16. CIERRE / EVENTOS        → Escape, backdrop, init
+
+  Notas de mantenimiento
+  ----------------------
+  - La seguridad NO depende de ocultar credenciales. La SUPABASE_ANON_KEY
+    es pública por diseño. La seguridad real la da Row Level Security (RLS)
+    en Supabase. Ver README.md para la configuración de políticas.
+  - Antes de publicar en producción, verifique que RLS esté activo en todas
+    las tablas y que la Edge Function "crear-usuario" valide el rol del
+    llamador.
+  - Los precios mostrados son referenciales y provienen de datos históricos
+    del Estado. No reemplazan una cotización formal. Ver aviso legal en la
+    interfaz.
+  - Para cambios de esquema en Supabase, actualice también las consultas en
+    este archivo (búsquelas por el nombre de la tabla o vista).
+
+  Contacto
+  --------
+  Para consultas técnicas o mejoras, contactar al autor.
+  ============================================================================
+-->
+
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo de Bienes y Servicios</title>
+
+<!-- Preconnect a CDNs (abre conexiones TCP/TLS temprano) -->
+<link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://dkqonaplzyyquojlhgul.supabase.co" crossorigin>
+
+<!-- Tailwind: ÚNICO script bloqueante, debe ejecutarse antes del primer pintado -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        brand: { 50:'#eff6ff',100:'#dbeafe',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' }
+      }
+    }
+  }
+}
+</script>
+
+<!-- Resto de librerías: defer para no bloquear el renderizado -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d4ed8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7.5 4.27 9 5.15'/%3E%3Cpath d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14'/%3E%3Cpath d='m3.3 7 8.7 5 8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3Ccircle cx='18.5' cy='15.5' r='2.5'/%3E%3Cpath d='M20.27 17.27 22 19'/%3E%3C/svg%3E">
+
+<!-- ============================================================
+     ESTILOS DE LA APP (antes inyectados por JS; ahora estáticos
+     para eliminar el FOUC y acelerar el primer pintado)
+     ============================================================ -->
+<style>
+  [x-cloak], .hidden { display:none !important; }
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .sortable { cursor:pointer; user-select:none; }
+  .sortable:hover { background:#f1f5f9; }
+  .dark .sortable:hover { background:#1e293b; }
+  .desc-cell { max-width:300px; }
+  .modal-backdrop { backdrop-filter: blur(3px); }
+  .toast { animation: toastIn .2s ease-out; }
+  @keyframes toastIn { from { transform:translateY(8px); opacity:0 } to { transform:translateY(0); opacity:1 } }
+  .nav-active { background:#eff6ff; color:#1d4ed8; font-weight:600; }
+  .dark .nav-active { background:#172554; color:#93c5fd; }
+  .scroll-thin::-webkit-scrollbar { width:7px; height:7px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:10px; }
+  .dark .scroll-thin::-webkit-scrollbar-thumb { background:#475569; }
+
+  /* --- Estilos dinámicos que antes se inyectaban por JS --- */
+  .field-label{display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:.45rem}
+  .field{width:100%;padding:.65rem .8rem;border:1px solid #cbd5e1;border-radius:.65rem;background:#f8fafc;font-size:.875rem;outline:none;transition:.15s}
+  .field:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12);background:white}
+  .dark .field{background:#0f172a;border-color:#334155;color:#f1f5f9}.dark .field:focus{background:#0f172a;border-color:#60a5fa}
+  .btn-primary,.btn-secondary,.btn-success,.btn-danger,.export-btn,.icon-btn{display:inline-flex;align-items:center;gap:.45rem;justify-content:center;cursor:pointer;transition:.15s}
+  .btn-primary{background:#1d4ed8;color:white;border-radius:.65rem;padding:.65rem 1rem;font-size:.875rem;font-weight:600}.btn-primary:hover{background:#1e40af}
+  .btn-secondary{background:white;border:1px solid #cbd5e1;color:#334155;border-radius:.65rem;padding:.62rem 1rem;font-size:.875rem;font-weight:600}.btn-secondary:hover{background:#f8fafc}
+  .dark .btn-secondary{background:#0f172a;border-color:#475569;color:#e2e8f0}.dark .btn-secondary:hover{background:#1e293b}
+  .btn-success{background:#047857;color:white;border-radius:.65rem;padding:.62rem 1rem;font-size:.875rem;font-weight:600}.btn-success:hover{background:#065f46}
+  .btn-danger{background:#dc2626;color:white;border-radius:.65rem;padding:.62rem 1rem;font-size:.875rem;font-weight:600}.btn-danger:hover{background:#b91c1c}
+  .export-btn{border:1px solid #cbd5e1;background:white;color:#475569;border-radius:.5rem;padding:.4rem .65rem;font-size:.72rem;font-weight:600}.export-btn:hover{background:#f8fafc}
+  .dark .export-btn{background:#0f172a;border-color:#475569;color:#cbd5e1}
+  .export-btn svg,.btn-primary svg,.btn-secondary svg,.btn-success svg,.btn-danger svg,.nav-item svg,.quick-btn svg{width:16px;height:16px}
+  .icon-btn{width:38px;height:38px;border:1px solid #cbd5e1;border-radius:.65rem;background:white;color:#475569}.icon-btn:hover{background:#f8fafc}.dark .icon-btn{background:#0f172a;border-color:#475569;color:#cbd5e1}
+  .nav-item{width:100%;display:flex;align-items:center;gap:.7rem;padding:.65rem .75rem;border-radius:.6rem;color:#475569;font-size:.85rem;text-align:left}.nav-item:hover{background:#f1f5f9}.dark .nav-item{color:#cbd5e1}.dark .nav-item:hover{background:#1e293b}
+  .nav-caption{font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;font-weight:700;padding:.5rem .75rem}
+  .role-badge{display:inline-flex;padding:.15rem .45rem;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:.65rem;font-weight:700;text-transform:uppercase}
+  .card{background:white;border:1px solid #e2e8f0;border-radius:1rem;box-shadow:0 1px 2px rgba(15,23,42,.03)}.dark .card{background:#0f172a;border-color:#1e293b}
+  .card-header{padding:1rem 1.25rem;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between}.dark .card-header{border-color:#1e293b}
+  .kpi-card{background:white;border:1px solid #e2e8f0;border-radius:1rem;padding:1.2rem;display:flex;align-items:center;gap:1rem}.dark .kpi-card{background:#0f172a;border-color:#1e293b}
+  .kpi-icon{width:42px;height:42px;border-radius:.75rem;display:flex;align-items:center;justify-content:center}.kpi-icon svg{width:20px}
+  .kpi-label{font-size:.72rem;color:#64748b;font-weight:600}.kpi-value{font-size:1.65rem;font-weight:800;line-height:1.2;margin-top:.2rem}
+  .quick-btn{display:flex;align-items:center;gap:.75rem;text-align:left;padding:.9rem;border:1px solid #e2e8f0;border-radius:.75rem;background:white}.quick-btn:hover{border-color:#93c5fd;background:#eff6ff}.dark .quick-btn{background:#0f172a;border-color:#334155}.dark .quick-btn:hover{background:#172554;border-color:#3b82f6}
+  .quick-btn svg{width:19px;height:19px;color:#2563eb;flex:none}.quick-btn strong{display:block;font-size:.82rem}.quick-btn small{display:block;font-size:.7rem;color:#94a3b8;margin-top:.15rem}
+  .progress{height:.5rem;border-radius:99px;background:#e2e8f0;overflow:hidden}.dark .progress{background:#1e293b}.progress-bar{height:100%;border-radius:99px;background:#2563eb;transition:width .3s}
+
+  /* --- Estilos de la tabla de acciones (antes tableStyle dinámico) --- */
+  .table-action{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:.45rem;color:#64748b}.table-action:hover{background:#f1f5f9}.dark .table-action:hover{background:#1e293b}.table-action svg{width:15px}
+  .status-active,.status-inactive{display:inline-flex;padding:.18rem .55rem;border-radius:999px;font-size:.68rem;font-weight:700}.status-active{background:#dcfce7;color:#15803d}.status-inactive{background:#e2e8f0;color:#64748b}.dark .status-inactive{background:#334155;color:#cbd5e1}
+</style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 min-h-screen">
+
+<!-- TOASTS -->
+<div id="toastArea" class="fixed top-4 right-4 z-[100] space-y-2 w-[min(380px,calc(100vw-2rem))]"></div>
+
+<!-- LOGIN -->
+<section id="loginScreen" class="min-h-screen flex items-center justify-center p-5">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-6">
+      <div class="mx-auto w-14 h-14 rounded-2xl bg-brand-700 text-white flex items-center justify-center shadow-lg">
+        <i data-lucide="PackageSearch" class="w-7 h-7"></i>
+      </div>
+      <h1 class="mt-4 text-2xl font-bold text-slate-900 dark:text-white">Catálogo de bienes y servicios</h1>
+      <p class="text-sm text-slate-500 mt-1">Catálogo de referencia para apoyar las compras y los planes de compras</p>
+    </div>
+    <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-7">
+      <h2 class="text-lg font-semibold">Iniciar sesión</h2>
+      <p class="text-xs text-slate-500 mt-1 mb-5">Ingrese el correo y la contraseña con que se registró...</p>
+      <form id="loginForm" class="space-y-4" novalidate>
+        <div>
+          <label class="field-label" for="loginEmail">Correo electrónico</label>
+          <input type="email" id="loginEmail" autocomplete="username" class="field" placeholder="usuario@institucion.gob.pa">
+        </div>
+        <div>
+          <label class="field-label" for="loginPassword">Contraseña</label>
+          <div class="relative">
+            <input type="password" id="loginPassword" autocomplete="current-password" class="field" placeholder="••••••••" style="padding-right:2.75rem">
+            <button type="button" id="togglePassword" onclick="toggleVerPasswordId('loginPassword','eyeIconLogin')"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-100 dark:hover:bg-slate-800 transition"
+                    aria-label="Mostrar u ocultar contraseña" title="Mostrar contraseña">
+              <i data-lucide="eye" id="eyeIconLogin" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+        <button type="submit" id="loginSubmitBtn" class="w-full btn-primary justify-center py-3">
+          <i data-lucide="log-in" class="w-4 h-4"></i>
+          <span id="loginBtnText">Entrar</span>
+        </button>
+        <p id="loginError" class="hidden text-sm text-red-600 dark:text-red-400" role="alert"></p>
+      </form>
+    </div>
+    <p class="text-center text-xs text-slate-400 mt-5">Desarrollado por MSarmiento, 2016-2026</p>
+  </div>
+</section>
+
+<!-- APP -->
+<div id="appScreen" class="hidden min-h-screen">
+  <!-- MOBILE HEADER -->
+  <header class="lg:hidden sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+    <div class="px-4 py-3 flex items-center justify-between">
+      <button onclick="toggleSidebar()" class="icon-btn" title="Menú"><i data-lucide="menu"></i></button>
+      <div class="flex items-center gap-2 font-bold"><i data-lucide="library-big" class="w-5 h-5 text-brand-600"></i> Catálogo</div>
+      <button onclick="toggleTheme()" class="icon-btn" title="Cambiar tema"><i data-lucide="sun-moon"></i></button>
+    </div>
+  </header>
+
+  <div id="sidebarOverlay" onclick="toggleSidebar()" class="hidden fixed inset-0 bg-black/40 z-40 lg:hidden"></div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar" class="fixed z-50 inset-y-0 left-0 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 flex flex-col">
+    <div class="px-5 py-5 border-b border-slate-200 dark:border-slate-800">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-700 text-white flex items-center justify-center"><i data-lucide="library-big"></i></div>
+        <div>
+          <div class="font-bold text-sm">Catálogo</div>
+          <div class="text-[11px] text-slate-400">Bienes y servicios</div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="p-3 space-y-1 flex-1 overflow-y-auto scroll-thin">
+      <div class="nav-caption">Navegación</div>
+      <button data-view="dashboard" onclick="showView('dashboard')" class="nav-item nav-active"><i data-lucide="layout-dashboard"></i> Tablero</button>
+      <button data-view="catalogo" onclick="showView('catalogo')" class="nav-item"><i data-lucide="package-search"></i> Catálogo</button>
+      <button data-view="comparar" onclick="showView('comparar')" class="nav-item"><i data-lucide="columns-3"></i> Comparar</button>
+
+      <div class="nav-caption mt-5">Administración</div>
+      <button id="navAdmin" data-view="admin" onclick="showView('admin')" class="nav-item hidden"><i data-lucide="shield-check"></i> Administración</button>
+      <button id="navCarga" data-view="carga" onclick="showView('carga')" class="nav-item hidden"><i data-lucide="upload"></i> Carga masiva</button>
+    </nav>
+
+    <div class="p-3 border-t border-slate-200 dark:border-slate-800">
+      <div class="px-3 py-2 mb-2 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+        <div id="sideUserEmail" class="text-xs font-semibold truncate"></div>
+        <div class="flex items-center gap-2 mt-1">
+          <span id="sideRole" class="role-badge">lector</span>
+        </div>
+      </div>
+      <button onclick="toggleTheme()" class="nav-item"><i data-lucide="sun-moon"></i> Tema claro / oscuro</button>
+      <button onclick="cerrarSesion()" class="nav-item text-red-600 dark:text-red-400"><i data-lucide="log-out"></i> Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <!-- CONTENT -->
+  <main class="lg:ml-64 min-h-screen">
+    <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+      <!-- AVISO GLOBAL -->
+      <div id="avisoObjetoGasto" class="mb-5 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 flex items-start gap-3">
+        <i data-lucide="info" class="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5"></i>
+        <div class="text-sm text-amber-900 dark:text-amber-200 leading-relaxed flex-1">
+          <strong>Estimado usuario: Note que la clasificación por el UNSPSC de la ONU y por el Objeto del Gasto del MEF, así como las descripciones de los bienes y servicios aquí registrados, son sólo referenciales.</strong> Se aconseja que usted verifique con su unidad de administración y planificación, antes de usarlas en una solicitud, plan de compras u otro proceso relacionado que sea oficial. A pesar que el catálogo se construyó a partir de compras históricas reales del Estado panameño (descargadas desde la plataforma oficial de la <strong><a href="https://v2.panamacompraencifras.gob.pa/descargas">Dirección General de Contrataciones Públicas de Panamá</a></strong>), contiene datos que requieren mejorarse y algunos no son 100% confiables. Si bien provienen de fuentes estatales de entero crédito, muchos datos no son de la mejor calidad y consecuentemente, se recomienda que sean usadas con precaución y de preferencia, verificados con otras fuentes.
+        </div>
+        <button onclick="document.getElementById('avisoObjetoGasto').remove()" class="icon-btn shrink-0" aria-label="Cerrar aviso" title="Cerrar aviso">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <!-- TOP BAR -->
+      <div class="hidden lg:flex items-center justify-between mb-7">
+        <div>
+          <div id="pageEyebrow" class="text-xs font-semibold uppercase tracking-wider text-brand-600">Panel de control</div>
+          <h1 id="pageTitle" class="text-2xl font-bold mt-1">Tablero</h1>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="text-right">
+            <div id="topEmail" class="text-xs font-medium"></div>
+            <div id="topRole" class="text-[11px] text-slate-400"></div>
+          </div>
+          <button onclick="toggleTheme()" class="icon-btn" title="Cambiar tema"><i data-lucide="sun-moon"></i></button>
+        </div>
+      </div>
+
+      <!-- DASHBOARD -->
+      <section id="view-dashboard" class="view">
+        <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
+          <div>
+            <h2 class="text-xl font-bold">Resumen del catálogo</h2>
+            <p class="text-sm text-slate-500 mt-1">Indicadores construidos sobre los registros actualmente disponibles.</p>
+          </div>
+          <button onclick="cargarDashboard()" class="btn-secondary"><i data-lucide="refresh-cw"></i> Actualizar</button>
+        </div>
+
+        <div id="dashboardLoading" class="hidden card p-10 text-center"><i data-lucide="loader-circle" class="animate-spin mx-auto w-7 h-7"></i><p class="text-sm text-slate-500 mt-2">Calculando indicadores...</p></div>
+
+        <div id="kpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="kpi-card"><div class="kpi-icon bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"><i data-lucide="package"></i></div><div><div class="kpi-label">Ítems activos</div><div id="kpiActivos" class="kpi-value">—</div></div></div>
+          <div class="kpi-card" title="Incluye bienes y servicios activos e inactivos. Los inactivos no aparecen en la consulta predeterminada del catálogo."><div class="kpi-icon bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"><i data-lucide="database"></i></div><div><div class="kpi-label">Total de registros</div><div id="kpiTotal" class="kpi-value">—</div></div></div>
+          <div class="kpi-card"><div class="kpi-icon bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"><i data-lucide="tag"></i></div><div><div class="kpi-label">Con código UNSPSC</div><div id="kpiUnspsc" class="kpi-value">—</div></div></div>
+          <div class="kpi-card"><div class="kpi-icon bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"><i data-lucide="circle-dollar-sign"></i></div><div><div class="kpi-label">Precio promedio observado</div><div id="kpiPrecio" class="kpi-value text-lg">—</div></div></div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mt-5">
+          <div class="card">
+            <div class="card-header"><div><h3 class="font-semibold">Distribución por estado</h3><p class="text-xs text-slate-400 mt-1">Registros activos e inactivos</p></div><i data-lucide="activity" class="text-slate-400"></i></div>
+            <div class="p-5">
+              <div class="h-4 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex"><div id="activeBar" class="h-full bg-emerald-500" style="width:0%"></div><div id="inactiveBar" class="h-full bg-slate-400" style="width:0%"></div></div>
+              <div class="grid grid-cols-2 gap-4 mt-4 text-sm">
+                <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 mr-2"></span>Activos <strong id="activePct" class="float-right">—</strong></div>
+                <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-400 mr-2"></span>Inactivos <strong id="inactivePct" class="float-right">—</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><div><h3 class="font-semibold">Calidad de catalogación</h3><p class="text-xs text-slate-400 mt-1">Cobertura de datos clave</p></div><i data-lucide="badge-check" class="text-slate-400"></i></div>
+            <div class="p-5 space-y-4">
+              <div><div class="flex justify-between text-xs mb-1"><span>Con UNSPSC</span><strong id="qualityUnspsc">—</strong></div><div class="progress"><div id="qualityUnspscBar" class="progress-bar" style="width:0%"></div></div></div>
+              <div><div class="flex justify-between text-xs mb-1"><span>Con unidad de medida</span><strong id="qualityUnidad">—</strong></div><div class="progress"><div id="qualityUnidadBar" class="progress-bar" style="width:0%"></div></div></div>
+              <div><div class="flex justify-between text-xs mb-1"><span>Con objeto del gasto</span><strong id="qualityObjeto">—</strong></div><div class="progress"><div id="qualityObjetoBar" class="progress-bar" style="width:0%"></div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-5">
+          <div class="card-header">
+            <div><h3 class="font-semibold">Tendencia histórica de precios por categoría de código UNSPSC</h3><p class="text-xs text-slate-400 mt-1">Promedio ponderado mensual de precios adjudicados (compras reales)</p></div>
+            <select id="segmentoTendencia" onchange="renderTendenciaChart()" class="field max-w-md py-1.5 text-xs"></select>
+          </div>
+          <div class="p-5">
+            <div id="tendenciaEmpty" class="hidden text-center text-sm text-slate-400 py-10">Aún no hay suficiente historial mensual para esta categoría. A medida que se acumulen más meses de datos, esta gráfica se irá poblando.</div>
+            <div style="position:relative;height:320px"><canvas id="chartTendencia"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card mt-5">
+<div class="card-header"><div><h3 class="font-semibold">Bienes y servicios con mayor volatilidad de precio</h3><p class="text-xs text-slate-400 mt-1">Sólo se incluyen bienes y servicios con variación menor al 200 %, excluyendo meses con precios anómalos y con menos de 2 observaciones.</p></div><i data-lucide="trending-up-down" class="text-slate-400"></i></div>
+          <div id="volatilidadLoading" class="p-10 text-center"><i data-lucide="loader-circle" class="animate-spin mx-auto w-6 h-6 text-brand-600"></i></div>
+          <div id="volatilidadWrap" class="hidden overflow-auto scroll-thin">
+            <table class="w-full text-left text-sm">
+              <thead><tr class="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-[11px] uppercase tracking-wider">
+                <th class="py-2.5 px-4">Descripción</th><th class="py-2.5 px-4 text-right">Mín.</th><th class="py-2.5 px-4 text-right">Prom.</th><th class="py-2.5 px-4 text-right">Máx.</th><th class="py-2.5 px-4 text-right">Variación</th><th class="py-2.5 px-4 text-center">Evolución</th>
+              </tr></thead>
+              <tbody id="volatilidadBody" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+            </table>
+            <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900">
+              <strong>Nota:</strong> la variación se calcula entre los percentiles 5 y 95 de los precios mensuales. Los bienes y servicios con variación mayor al 200%, se excluyen porque probablemente mezclan unidades de medida o contienen errores de captura en los datos de origen.
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-5">
+          <div class="card-header"><div><h3 class="font-semibold">Acciones rápidas</h3><p class="text-xs text-slate-400 mt-1">Acceda directamente a las funciones principales</p></div></div>
+          <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <button onclick="showView('catalogo'); document.getElementById('searchBox').focus()" class="quick-btn"><i data-lucide="search"></i><span><strong>Buscar en catálogo</strong><small>Localizar bienes y servicios</small></span></button>
+            <button onclick="showView('comparar')" class="quick-btn"><i data-lucide="columns-3"></i><span><strong>Comparar</strong><small>Comparar varios registros</small></span></button>
+            <button id="quickAdd" onclick="abrirModalAgregar()" class="quick-btn hidden"><i data-lucide="plus-circle"></i><span><strong>Agregar ítem</strong><small>Crear un nuevo registro</small></span></button>
+            <button id="quickAdmin" onclick="showView('admin')" class="quick-btn hidden"><i data-lucide="users"></i><span><strong>Usuarios</strong><small>Administrar roles</small></span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CATALOGO -->
+      <section id="view-catalogo" class="view hidden">
+        <div class="card mb-5">
+          <div class="p-5">
+            <div class="flex flex-col xl:flex-row xl:items-end gap-4">
+              <div class="flex-1">
+                <label class="field-label">Búsqueda por palabras (texto completo)</label>
+                <div class="relative">
+                  <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"></i>
+                  <input id="searchBox" type="text" placeholder="Buscar por descripción..." style="padding-left:2.4rem" class="field" title="Busca por palabras dentro de la descripción. Presione Enter o el botón Buscar. No busca códigos exactos — use el campo de código UNSPSC.">
+                </div>
+              </div>
+              <div class="w-full xl:w-52">
+                <label class="field-label">Código UNSPSC exacto</label>
+                <input id="filtroUnspscExacto" class="field" placeholder="Ej. 43211708">
+              </div>
+              <div class="w-full xl:w-48">
+                <label class="field-label">Estado</label>
+                <select id="filtroActivo" class="field"><option value="activos">Activos</option><option value="inactivos">Inactivos</option><option value="todos">Todos</option></select>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <div><label class="field-label">Objeto del gasto</label><select id="filtroObjetoGasto" class="field"><option value="">Todos</option></select></div>
+              <div><label class="field-label">Unidad de medida</label><select id="filtroUnidad" class="field"><option value="">Todas</option></select></div>
+            </div>
+            <div class="flex flex-wrap gap-2 mt-4">
+              <button onclick="aplicarFiltros()" class="btn-primary"><i data-lucide="search"></i> Buscar</button>
+              <button onclick="limpiarFiltros()" class="btn-secondary"><i data-lucide="rotate-ccw"></i> Limpiar filtros</button>
+              <button id="btnAgregar" onclick="abrirModalAgregar()" class="hidden btn-success"><i data-lucide="plus"></i> Agregar ítem</button>
+              <span class="ml-auto text-xs text-slate-400 self-center">Ordene haciendo clic en los encabezados subrayables.</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="loadingIndicator" class="hidden card p-10 text-center"><i data-lucide="loader-circle" class="animate-spin mx-auto w-7 h-7 text-brand-600"></i><p class="text-sm text-slate-500 mt-2">Consultando catálogo...</p></div>
+
+        <div id="tableContainer" class="card overflow-hidden hidden">
+          <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-3">
+            <div id="paginacionTop" class="flex items-center gap-1 text-xs"></div>
+            <div class="ml-auto flex items-center gap-2">
+              <span id="resultCount" class="text-xs text-slate-500"></span>
+              <button onclick="exportarCSV()" class="export-btn"><i data-lucide="file-down"></i> CSV</button>
+              <button onclick="exportarExcel()" class="export-btn"><i data-lucide="file-spreadsheet"></i> Excel</button>
+              <button onclick="exportarPDF()" class="export-btn"><i data-lucide="file-text"></i> PDF</button>
+            </div>
+          </div>
+          <div class="overflow-auto scroll-thin">
+            <table class="w-full text-left min-w-[1250px]">
+              <thead><tr class="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-[11px] uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
+                <th class="py-3 px-4 font-semibold sticky left-0 bg-slate-100 dark:bg-slate-800/80 z-10">Acciones</th>
+                <th class="py-3 px-4 font-semibold">Descripción</th>
+                <th class="py-3 px-4 font-semibold sortable" onclick="toggleSort('codigo_unspsc')">UNSPSC <span id="arrow_codigo_unspsc"></span></th>
+                <th class="py-3 px-4 font-semibold sortable" onclick="toggleSort('unspsc_descripcion')">Descripción UNSPSC <span id="arrow_unspsc_descripcion"></span></th>
+                <th class="py-3 px-4 font-semibold sortable" onclick="toggleSort('nombre','unidades_medida')">Unidad <span id="arrow_nombre"></span></th>
+                <th class="py-3 px-4 font-semibold sortable" onclick="toggleSort('descripcion','objeto_gasto')">Objeto del gasto <span id="arrow_descripcion"></span></th>
+                <th class="py-3 px-4 font-semibold text-center sortable" onclick="toggleSort('num_observaciones')" title="Número total de transacciones registradas">N° de Compras <span id="arrow_num_observaciones"></span></th>
+                <th class="py-3 px-4 font-semibold text-right sortable" onclick="toggleSort('precio_min_observado')">Mín. <span id="arrow_precio_min_observado"></span></th>
+                <th class="py-3 px-4 font-semibold text-right sortable" onclick="toggleSort('precio_promedio_observado')">Prom. <span id="arrow_precio_promedio_observado"></span></th>
+                <th class="py-3 px-4 font-semibold text-right sortable" onclick="toggleSort('precio_max_observado')">Máx. <span id="arrow_precio_max_observado"></span></th>
+                <th class="py-3 px-4 font-semibold text-center sortable" onclick="toggleSort('activo')">Estado <span id="arrow_activo"></span></th>
+              </tr></thead>
+              <tbody id="catalogoTableBody" class="divide-y divide-slate-200 dark:divide-slate-800 text-sm"></tbody>
+            </table>
+          </div>
+          <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-800 flex justify-start"><div id="paginacionBottom" class="flex items-center gap-1 text-xs"></div></div>
+        </div>
+        <div id="emptyMessage" class="hidden card p-12 text-center"><i data-lucide="search-x" class="mx-auto w-9 h-9 text-slate-300"></i><p class="font-medium mt-3">No se encontraron registros</p><p class="text-sm text-slate-400 mt-1">Pruebe con otros filtros o términos de búsqueda.</p></div>
+      </section>
+
+      <!-- COMPARAR -->
+      <section id="view-comparar" class="view hidden">
+        <div class="card mb-5">
+          <div class="p-5">
+            <h2 class="text-lg font-semibold">Comparación de bienes y servicios</h2>
+            <p class="text-sm text-slate-500 mt-1">Seleccione registros del catálogo para ver sus datos lado a lado.</p>
+            <div class="flex gap-2 mt-4">
+              <input id="compareSearch" class="field" placeholder="Buscar una descripción o código UNSPSC..." onkeydown="if(event.key==='Enter')buscarParaComparar()">
+              <button onclick="buscarParaComparar()" class="btn-primary"><i data-lucide="search"></i> Buscar</button>
+            </div>
+          </div>
+        </div>
+        <div id="compareResults" class="hidden card mb-5">
+          <div class="card-header"><h3 class="font-semibold">Resultados</h3><span class="text-xs text-slate-400">Máximo 6 para comparar</span></div>
+          <div id="compareResultList" class="divide-y divide-slate-200 dark:divide-slate-800"></div>
+        </div>
+        <div id="compareEmpty" class="card p-10 text-center text-sm text-slate-400">Busque y seleccione registros para comenzar la comparación.</div>
+        <div id="comparisonTableWrap" class="hidden card mt-5 overflow-auto scroll-thin"></div>
+      </section>
+
+      <!-- ADMIN -->
+      <section id="view-admin" class="view hidden">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="font-semibold">Administración de usuarios</h2>
+              <p class="text-xs text-slate-400 mt-1">Crear usuarios nuevos y gestionar sus roles.</p>
+            </div>
+            <button onclick="abrirModalCrearUsuario()" class="btn-primary text-sm">
+              <i data-lucide="user-plus"></i> Agregar usuario
+            </button>
+          </div>
+          <div class="p-5">
+            <div id="adminNotice" class="mb-4 p-3 rounded-lg bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200 text-sm">Los permisos efectivos deben permanecer protegidos por Row Level Security en Supabase.</div>
+            <div id="usersLoading" class="text-sm text-slate-500">Cargando usuarios...</div>
+            <div class="overflow-auto scroll-thin hidden" id="usersTableWrap">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="bg-slate-100 dark:bg-slate-800 text-left text-xs uppercase text-slate-500">
+                    <th class="p-3">Correo</th>
+                    <th class="p-3">Rol</th>
+                    <th class="p-3">Acción</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody" class="divide-y divide-slate-200 dark:divide-slate-800"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CARGA -->
+      <section id="view-carga" class="view hidden">
+        <div class="card">
+          <div class="card-header"><div><h2 class="font-semibold">Carga masiva</h2><p class="text-xs text-slate-400 mt-1">Herramienta reservada para administradores.</p></div><i data-lucide="upload" class="text-brand-600"></i></div>
+          <div class="p-5">
+            <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 text-sm mb-5">
+              <strong>Importante:</strong> esta pantalla prepara y valida un archivo, pero no modifica la base de datos hasta que se confirme. La estructura de importación debe coincidir con la tabla de destino.
+            </div>
+            <label class="field-label">Archivo Excel o CSV</label>
+            <input id="bulkFile" type="file" accept=".xlsx,.xls,.csv" class="field">
+            <div class="flex gap-2 mt-4"><button onclick="previsualizarCarga()" class="btn-primary"><i data-lucide="eye"></i> Previsualizar</button><button onclick="limpiarCarga()" class="btn-secondary">Limpiar</button></div>
+            <div id="bulkPreview" class="hidden mt-5 overflow-auto scroll-thin"></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ITEM MODAL -->
+<div id="itemModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[70] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-auto">
+    <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div><div id="modalEyebrow" class="text-xs text-brand-600 font-semibold uppercase">Catálogo</div><h3 id="modalTitle" class="text-lg font-bold mt-1">Agregar ítem</h3></div>
+      <button onclick="cerrarModal()" class="icon-btn"><i data-lucide="x"></i></button>
+    </div>
+    <form id="itemForm" class="p-6 space-y-4">
+      <input type="hidden" id="itemId">
+      <div><label class="field-label">Descripción *</label><textarea id="itemDescripcion" required minlength="5" rows="4" class="field" placeholder="Describa claramente el bien o servicio"></textarea><p class="text-[11px] text-slate-400 mt-1">Se recomienda una descripción específica y reutilizable.</p></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div><label class="field-label">Código UNSPSC</label><input id="itemUnspsc" class="field" placeholder="Ej. 43211708"><p class="text-[11px] text-slate-400 mt-1">Debe corresponder a un código válido de referencia.</p></div>
+        <div><label class="field-label">Unidad de medida</label><select id="itemUnidad" class="field"><option value="">— ninguna —</option></select></div>
+      </div>
+      <div><label class="field-label">Objeto del gasto</label><select id="itemObjetoGasto" class="field"><option value="">— sin clasificar —</option></select></div>
+      <label class="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 cursor-pointer"><input type="checkbox" id="itemActivo" class="w-4 h-4 accent-blue-600" checked><span><strong class="text-sm">Ítem activo</strong><span class="block text-xs text-slate-400">Los ítems inactivos no aparecen en la consulta predeterminada.</span></span></label>
+      <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 text-xs text-slate-500"><strong>Precios:</strong> mínimo, promedio y máximo son calculados a partir de los datos históricos y no se editan desde esta ficha.</div>
+      <p id="itemFormError" class="hidden text-sm text-red-600"></p>
+      <div class="flex flex-col-reverse sm:flex-row gap-3 pt-2"><button type="button" onclick="cerrarModal()" class="btn-secondary flex-1 justify-center">Cancelar</button><button type="submit" class="btn-primary flex-1 justify-center"><i data-lucide="save"></i> Guardar</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div id="detailModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[65] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-auto">
+    <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-start"><div><div class="text-xs text-brand-600 font-semibold uppercase">Ficha del catálogo</div><h3 id="detailTitle" class="text-xl font-bold mt-1"></h3></div><button onclick="cerrarDetalle()" class="icon-btn"><i data-lucide="x"></i></button></div>
+    <div id="detailBody" class="p-6"></div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="confirmModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[80] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <div class="w-11 h-11 rounded-full bg-red-100 text-red-600 flex items-center justify-center"><i data-lucide="triangle-alert"></i></div>
+    <h3 id="confirmTitle" class="font-bold text-lg mt-4">Confirmar acción</h3>
+    <p id="confirmText" class="text-sm text-slate-500 mt-2"></p>
+    <div class="flex gap-3 mt-6"><button onclick="resolverConfirmacion(false)" class="btn-secondary flex-1 justify-center">Cancelar</button><button onclick="resolverConfirmacion(true)" class="btn-danger flex-1 justify-center">Confirmar</button></div>
+  </div>
+</div>
+
+<!-- MOTIVO DE BAJA MODAL -->
+<div id="motivoBajaModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[80] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-start justify-between">
+      <div class="w-11 h-11 rounded-full bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 flex items-center justify-center">
+        <i data-lucide="archive"></i>
+      </div>
+      <button onclick="resolverMotivoBaja(null)" class="icon-btn" aria-label="Cerrar" title="Cerrar">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <h3 class="font-bold text-lg mt-4">Dar de baja el ítem</h3>
+    <p id="motivoBajaItem" class="text-sm text-slate-500 mt-1"></p>
+    <label class="field-label mt-4" for="motivoBajaTexto">Motivo de baja *</label>
+    <textarea id="motivoBajaTexto" rows="3" class="field" placeholder="Ej. Duplicado, descontinuado, mal catalogado…" maxlength="300"></textarea>
+    <p id="motivoBajaError" class="hidden text-xs text-red-600 dark:text-red-400 mt-1">Ingrese al menos 5 caracteres.</p>
+    <div class="flex gap-3 mt-6">
+      <button type="button" onclick="resolverMotivoBaja(null)" class="btn-secondary flex-1 justify-center">Cancelar</button>
+      <button type="button" onclick="resolverMotivoBaja('__submit__')" class="btn-danger flex-1 justify-center">
+        <i data-lucide="archive"></i> Dar de baja
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- CREATE USER MODAL -->
+<div id="createUserModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[75] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-auto">
+    <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div>
+        <div class="text-xs text-brand-600 font-semibold uppercase">Administración</div>
+        <h3 class="text-lg font-bold mt-1">Agregar usuario</h3>
+      </div>
+      <button onclick="cerrarModalCrearUsuario()" class="icon-btn" aria-label="Cerrar">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <form id="createUserForm" class="p-6 space-y-4" novalidate>
+      <div>
+        <label class="field-label" for="newUserName">Nombre completo *</label>
+        <input type="text" id="newUserName" class="field" placeholder="Ej. Juan Pérez" autocomplete="off" maxlength="120">
+      </div>
+
+      <div>
+        <label class="field-label" for="newUserEmail">Correo electrónico *</label>
+        <input type="email" id="newUserEmail" class="field" placeholder="usuario@institucion.gob.pa" autocomplete="off">
+      </div>
+
+      <div>
+        <label class="field-label" for="newUserPassword">Contraseña temporal *</label>
+        <div class="relative">
+          <input type="password" id="newUserPassword" class="field" placeholder="Mínimo 8 caracteres" autocomplete="new-password" style="padding-right:2.75rem">
+          <button type="button" onclick="toggleVerPasswordId('newUserPassword','eyeIconNewUser')"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-100 dark:hover:bg-slate-800 transition"
+                  aria-label="Mostrar u ocultar contraseña" title="Mostrar contraseña">
+            <i data-lucide="eye" id="eyeIconNewUser" class="w-4 h-4"></i>
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-1">Debe incluir al menos: una minúscula, una mayúscula, un número y un carácter especial (!@#$%&*). El usuario deberá cambiarla en su primer ingreso.</p>
+      </div>
+
+      <div>
+        <label class="field-label" for="newUserRol">Rol *</label>
+        <select id="newUserRol" class="field">
+          <option value="lector">Lector — solo consulta</option>
+          <option value="editor">Editor — puede agregar y editar ítems</option>
+          <option value="administrador">Administrador — control total</option>
+        </select>
+      </div>
+
+      <p id="createUserError" class="hidden text-sm text-red-600 dark:text-red-400" role="alert"></p>
+
+      <div class="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+        <button type="button" onclick="cerrarModalCrearUsuario()" class="btn-secondary flex-1 justify-center">Cancelar</button>
+        <button type="submit" id="createUserSubmitBtn" class="btn-primary flex-1 justify-center">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+          <span id="createUserBtnText">Crear usuario</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- CREATE USER SUCCESS MODAL -->
+<div id="createUserSuccessModal" class="hidden fixed inset-0 bg-black/50 modal-backdrop z-[76] items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg">
+    <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center">
+          <i data-lucide="check" class="w-5 h-5 text-emerald-600 dark:text-emerald-400"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-bold">Usuario creado</h3>
+          <p class="text-xs text-slate-500">Comparta estas credenciales con el usuario.</p>
+        </div>
+      </div>
+      <button onclick="cerrarModalExitoCrearUsuario()" class="icon-btn" aria-label="Cerrar">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+
+    <div class="p-6 space-y-4">
+      <div class="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200 text-xs">
+        <strong>Importante:</strong> esta contraseña es temporal. El usuario deberá cambiarla en su primer ingreso. No se volverá a mostrar.
+      </div>
+
+      <div>
+        <label class="field-label">Nombre</label>
+        <input id="successNombre" class="field text-sm" readonly>
+      </div>
+
+      <div>
+        <label class="field-label">Correo</label>
+        <div class="flex gap-2">
+          <input id="successEmail" class="field font-mono text-sm" readonly>
+          <button type="button" onclick="copiarCredencial('successEmail')" class="btn-secondary" title="Copiar">
+            <i data-lucide="copy" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label class="field-label">Contraseña temporal</label>
+        <div class="flex gap-2">
+          <input id="successPassword" class="field font-mono text-sm" readonly>
+          <button type="button" onclick="copiarCredencial('successPassword')" class="btn-secondary" title="Copiar">
+            <i data-lucide="copy" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label class="field-label">Rol asignado</label>
+        <div id="successRol" class="field text-sm"></div>
+      </div>
+
+      <button onclick="cerrarModalExitoCrearUsuario()" class="btn-primary w-full justify-center py-3">
+        Entendido
+      </button>
+    </div>
+  </div>
+</div>
+
+<footer class="hidden"></footer>
+
+<script>
+/* ============================================================
+   CONFIGURACIÓN
+   ============================================================ */
+const SUPABASE_URL            = 'https://dkqonaplzyyquojlhgul.supabase.co';
+const SUPABASE_ANON_KEY       = 'sb_publishable_U2OgVmdeoMGdZn8vAMoamQ_RXPp0k66';
+const SUPABASE_EDGE_CREAR_USU = SUPABASE_URL + '/functions/v1/crear-usuario';
+const supabaseClient          = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const PAGE_SIZE = 20;
+let paginaActual = 0, totalCount = 0;
+let currentRole = 'lector', currentUser = null;
+let unidadesList = [], objetoGastoList = [], filaEnPantalla = [];
+let sortColumn = 'id_item', sortForeignTable = null, sortAscending = true;
+let currentView = 'dashboard', compareItems = [], confirmResolver = null;
+let dashboardLoaded = false;
+let tendenciaData = [], chartTendencia = null;
+
+/* ============================================================
+   UTILIDADES
+   ============================================================ */
+function esc(v='') {
+  return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function money(v) {
+  if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '—';
+  return 'B/. ' + Number(v).toLocaleString('es-PA',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function toast(message, type='info') {
+  const colors={info:'bg-slate-900',success:'bg-emerald-700',error:'bg-red-700',warning:'bg-amber-600'};
+  const icons={info:'info',success:'circle-check',error:'circle-alert',warning:'triangle-alert'};
+  const el=document.createElement('div');
+  el.className=`toast ${colors[type]||colors.info} text-white rounded-xl shadow-lg px-4 py-3 flex items-start gap-3 text-sm`;
+  el.innerHTML=`<i data-lucide="${icons[type]||icons.info}" class="w-5 h-5 shrink-0"></i><span>${esc(message)}</span>`;
+  document.getElementById('toastArea').appendChild(el); lucide.createIcons();
+  setTimeout(()=>el.remove(),4200);
+}
+function roleLabel(r) {
+  if (r === 'administrador') return 'Administrador';
+  if (r === 'editor')        return 'Editor';
+  return 'Lector';
+}
+function canEdit(){ return currentRole === 'editor'||currentRole === 'administrador'; }
+function canDelete(){ return currentRole === 'administrador'; }
+
+/* ============================================================
+   TEMA / SIDEBAR
+   ============================================================ */
+function toggleTheme(){
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('catalogo_theme',document.documentElement.classList.contains('dark')?'dark':'light');
+}
+if(localStorage.getItem('catalogo_theme')!=='light') document.documentElement.classList.add('dark');
+function toggleSidebar(){
+  const s=document.getElementById('sidebar'), o=document.getElementById('sidebarOverlay');
+  s.classList.toggle('-translate-x-full'); o.classList.toggle('hidden');
+}
+
+/* ============================================================
+   LOGIN — Validación + traducción + botón ojo
+   ============================================================ */
+
+// Traduce mensajes de error de Supabase Auth al español
+function traducirErrorAuth(msg = '') {
+  const m = String(msg).toLowerCase();
+  if (m.includes('invalid login credentials'))     return 'Correo o contraseña incorrectos.';
+  if (m.includes('email not confirmed'))           return 'Debe confirmar su correo antes de ingresar.';
+  if (m.includes('user already registered'))       return 'Ya existe una cuenta con ese correo.';
+  if (m.includes('password should be at least'))   return 'La contraseña es demasiado corta.';
+  if (m.includes('password should contain at least one character of each'))
+    return 'La contraseña debe contener al menos un carácter de cada uno de los siguientes grupos: minúsculas (abc...z), mayúsculas (ABC...Z), números (0123456789), y caracteres especiales (!@#$%^&*()_+-=[]{};\':"|<>?,./`~).';
+  if (m.includes('unable to validate email'))      return 'El correo electrónico no tiene un formato válido.';
+  if (m.includes('rate limit') || m.includes('too many')) return 'Demasiados intentos. Espere unos minutos e intente de nuevo.';
+  if (m.includes('network') || m.includes('fetch'))       return 'Sin conexión. Verifique su red.';
+  if (m.includes('for security purposes'))         return 'Por seguridad, espere unos segundos antes de reintentar.';
+  return msg || 'Ocurrió un error inesperado.';
+}
+
+// Valida formato de correo
+function emailValido(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+// Muestra/oculta el mensaje de error del login
+function mostrarErrorLogin(msg) {
+  const err = document.getElementById('loginError');
+  err.textContent = msg;
+  err.classList.remove('hidden');
+}
+function limpiarErrorLogin() {
+  const err = document.getElementById('loginError');
+  err.textContent = '';
+  err.classList.add('hidden');
+}
+
+// Envío del formulario de login
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  limpiarErrorLogin();
+
+  const email    = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+
+  if (!email)              { mostrarErrorLogin('Por favor, ingrese su correo electrónico.'); return; }
+  if (!emailValido(email)) { mostrarErrorLogin('El correo electrónico no tiene un formato válido.'); return; }
+  if (!password)           { mostrarErrorLogin('Por favor, ingrese su contraseña.'); return; }
+
+  setBotonCargando('loginSubmitBtn', 'loginBtnText', true, 'Entrar');
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+  setBotonCargando('loginSubmitBtn', 'loginBtnText', false, 'Entrar');
+
+  if (error) {
+    mostrarErrorLogin(traducirErrorAuth(error.message));
+    return;
+  }
+  await iniciarApp(data.user);
+});
+supabaseClient.auth.onAuthStateChange((event,session)=>{
+  if(event==='SIGNED_OUT'){document.getElementById('appScreen').classList.add('hidden');document.getElementById('loginScreen').classList.remove('hidden');}
+});
+supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) iniciarApp(session.user); });
+
+async function cerrarSesion(){ await supabaseClient.auth.signOut(); location.reload(); }
+
+async function iniciarApp(user){
+  try{
+    currentUser=user;
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+
+    // Consulta robusta a perfiles buscando por id o correo para evitar el error de rol lector por defecto
+    let perfil = null;
+    const resId = await supabaseClient.from('perfiles').select('rol').eq('id', user.id).maybeSingle();
+    if (resId.data) {
+      perfil = resId.data;
+    } else {
+      console.warn('No se encontró perfil por ID, intentando por correo...', resId.error?.message);
+      const resEmail = await supabaseClient.from('perfiles').select('rol').eq('correo', user.email).maybeSingle();
+      if (resEmail.data) perfil = resEmail.data;
+    }
+
+    currentRole = (perfil?.rol || 'lector').toLowerCase();
+    console.log('Rol efectivo asignado:', currentRole);
+
+    document.getElementById('sideUserEmail').textContent=user.email||'Usuario';
+    document.getElementById('sideRole').textContent=roleLabel(currentRole);
+    document.getElementById('topEmail').textContent=user.email||'';
+    document.getElementById('topRole').textContent=roleLabel(currentRole);
+
+    const admin=currentRole==='administrador';
+    document.getElementById('navAdmin').classList.toggle('hidden',!admin);
+    document.getElementById('navCarga').classList.toggle('hidden',!admin);
+    document.getElementById('quickAdmin').classList.toggle('hidden',!admin);
+    document.getElementById('quickAdd').classList.toggle('hidden',!canEdit());
+    document.getElementById('btnAgregar').classList.toggle('hidden',!canEdit());
+
+    await cargarTablasReferencia();
+    showView('dashboard');
+  }catch(err){console.error(err);toast('No fue posible iniciar la aplicación: '+err.message,'error');}
+}
+
+/* ============================================================
+   NAVEGACIÓN
+   ============================================================ */
+const titles={
+ dashboard:['Panel de control','Tablero'],
+ catalogo:['Consulta','Catálogo de bienes y servicios'],
+ comparar:['Análisis','Comparar'],
+ admin:['Administración','Usuarios y permisos'],
+ carga:['Administración','Carga masiva']
+};
+function showView(view){
+  if((view==='admin'||view==='carga') && currentRole!=='administrador'){toast('No tiene permisos para acceder a esta sección.','warning');return;}
+  currentView=view;
+  document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));
+  document.getElementById('view-'+view).classList.remove('hidden');
+  document.querySelectorAll('.nav-item[data-view]').forEach(b=>b.classList.toggle('nav-active',b.dataset.view===view));
+  document.getElementById('pageEyebrow').textContent=titles[view][0];
+  document.getElementById('pageTitle').textContent=titles[view][1];
+  if(view==='dashboard'&&!dashboardLoaded) cargarDashboard();
+  if(view==='catalogo'&&filaEnPantalla.length===0) cargarDatosCatalogo();
+  if(view==='admin') cargarUsuarios();
+  if(window.innerWidth<1024) toggleSidebar();
+}
+
+/* ============================================================
+   TABLAS DE REFERENCIA
+   ============================================================ */
+async function cargarTablasReferencia(){
+  const [u,o]=await Promise.all([
+    supabaseClient.from('unidades_medida').select('id_unidad,nombre').order('nombre'),
+    supabaseClient.from('objeto_gasto').select('codigo_objeto_gasto,descripcion').order('descripcion')
+  ]);
+  unidadesList=u.data||[]; objetoGastoList=o.data||[];
+  const sf=document.getElementById('filtroUnidad'), si=document.getElementById('itemUnidad');
+  const ogf=document.getElementById('filtroObjetoGasto'),ogi=document.getElementById('itemObjetoGasto');
+  sf.innerHTML='<option value="">Todas</option>'; si.innerHTML='<option value="">— ninguna —</option>';
+  ogf.innerHTML='<option value="">Todos</option>'; ogi.innerHTML='<option value="">— sin clasificar —</option>';
+  unidadesList.forEach(x=>{sf.insertAdjacentHTML('beforeend',`<option value="${esc(x.id_unidad)}">${esc(x.nombre)}</option>`);si.insertAdjacentHTML('beforeend',`<option value="${esc(x.id_unidad)}">${esc(x.nombre)}</option>`);});
+  objetoGastoList.forEach(x=>{const l=`${x.codigo_objeto_gasto} - ${x.descripcion}`;ogf.insertAdjacentHTML('beforeend',`<option value="${esc(x.codigo_objeto_gasto)}">${esc(l)}</option>`);ogi.insertAdjacentHTML('beforeend',`<option value="${esc(x.codigo_objeto_gasto)}">${esc(l)}</option>`);});
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+async function cargarDashboard(){
+  const load=document.getElementById('dashboardLoading'); load.classList.remove('hidden');
+  try{
+    const {data,error}=await supabaseClient.from('vista_kpis_dashboard').select('*').single();
+    if(error) throw error;
+
+    const total=Number(data.total)||0, activos=Number(data.activos)||0, inactivos=Number(data.inactivos)||0;
+    const unspsc=Number(data.con_unspsc)||0, unidad=Number(data.con_unidad)||0, objeto=Number(data.con_objeto_gasto)||0;
+    const avg=data.precio_promedio_general!==null?Number(data.precio_promedio_general):null;
+
+    document.getElementById('kpiActivos').textContent=activos.toLocaleString('es-PA');
+    document.getElementById('kpiTotal').textContent=total.toLocaleString('es-PA');
+    document.getElementById('kpiUnspsc').textContent=`${unspsc.toLocaleString('es-PA')} (${total?Math.round(unspsc/total*100):0}%)`;
+    document.getElementById('kpiPrecio').textContent=money(avg);
+
+    const ap=total?activos/total*100:0, ip=100-ap;
+    document.getElementById('activeBar').style.width=ap+'%'; document.getElementById('inactiveBar').style.width=ip+'%';
+    document.getElementById('activePct').textContent=`${ap.toFixed(2)}% (${activos.toLocaleString('es-PA')})`;
+    document.getElementById('inactivePct').textContent=`${ip.toFixed(2)}% (${inactivos.toLocaleString('es-PA')})`;
+
+    setQuality('Unspsc',unspsc,total); setQuality('Unidad',unidad,total); setQuality('Objeto',objeto,total);
+    dashboardLoaded=true;
+    cargarTendenciaPrecios();
+    cargarVolatilidad();
+  }catch(e){console.error(e);toast('No fue posible calcular el tablero: '+e.message,'error');}
+  finally{load.classList.add('hidden');}
+}
+
+/* ============================================================
+   TENDENCIA HISTÓRICA DE PRECIOS POR CATEGORÍA
+   ============================================================ */
+// Nombres oficiales de los 55 segmentos UNSPSC (nivel mas general, primeros 2 digitos del codigo).
+// Fuente: estandar UNSPSC (segment descriptions), traducido. No cambia salvo nueva version del estandar.
+const SEGMENTOS_UNSPSC={
+  '10':'Material Vivo Vegetal y Animal y Accesorios y Suministros',
+  '11':'Materiales Minerales, Textiles y Vegetales y Animales No Comestibles',
+  '12':'Quimicos, incluidos Bioquimicos y Materiales Gaseosos',
+  '13':'Resinas, Colofonias, Cauchos, Espumas, Peliculas y Materiales Elastomericos',
+  '14':'Materiales y Productos de Papel',
+  '15':'Combustibles, Aditivos para Combustibles, Lubricantes y Materiales Anticorrosivos',
+  '20':'Maquinaria y Accesorios para Mineria y Perforacion de Pozos',
+  '21':'Maquinaria y Accesorios para Agricultura, Pesca, Silvicultura y Fauna',
+  '22':'Maquinaria y Accesorios para Construccion y Edificacion',
+  '23':'Maquinaria y Accesorios para Manufactura y Procesamiento Industrial',
+  '24':'Maquinaria, Accesorios y Suministros para Manejo, Acondicionamiento y Almacenamiento',
+  '25':'Vehiculos Comerciales, Militares y Particulares y sus Accesorios y Componentes',
+  '26':'Maquinaria y Accesorios para Generacion y Distribucion de Energia',
+  '27':'Herramientas y Maquinaria General',
+  '30':'Componentes y Suministros para Estructuras, Edificacion, Construccion y Manufactura',
+  '31':'Componentes y Suministros de Manufactura',
+  '32':'Componentes y Suministros Electronicos',
+  '39':'Sistemas Electricos, Iluminacion, Componentes y Suministros',
+  '40':'Sistemas y Equipos de Distribucion y Acondicionamiento (HVAC, Plomeria)',
+  '41':'Equipos de Laboratorio, Medicion, Observacion y Pruebas',
+  '42':'Equipo Medico, Accesorios y Suministros',
+  '43':'Tecnologia de Informacion, Radiodifusion y Telecomunicaciones',
+  '44':'Equipos de Oficina, Accesorios y Suministros',
+  '45':'Equipos y Suministros de Impresion, Fotografia, Audio y Video',
+  '46':'Equipos y Suministros de Defensa, Orden Publico, Seguridad y Proteccion',
+  '47':'Equipos y Suministros de Limpieza',
+  '48':'Maquinaria y Equipos para la Industria de Servicios',
+  '49':'Equipos, Suministros y Accesorios Deportivos y Recreativos',
+  '50':'Alimentos, Bebidas y Productos de Tabaco',
+  '51':'Medicamentos y Productos Farmaceuticos',
+  '52':'Electrodomesticos, Suministros y Electronica de Consumo',
+  '53':'Ropa, Maletas y Productos de Cuidado Personal',
+  '54':'Relojeria, Joyeria y Piedras Preciosas',
+  '55':'Productos Publicados (Libros, Software, Medios)',
+  '56':'Muebles y Mobiliario',
+  '60':'Instrumentos Musicales, Juegos, Juguetes, Artes y Equipo Educativo',
+  '64':'Instrumentos y Productos Financieros',
+  '70':'Servicios de Contratacion Agricola, Pesquera, Forestal y de Fauna',
+  '71':'Servicios de Mineria, Petroleo y Gas',
+  '72':'Servicios de Construccion y Mantenimiento de Edificios e Instalaciones',
+  '73':'Servicios de Produccion Industrial y Manufactura',
+  '76':'Servicios de Limpieza Industrial',
+  '77':'Servicios Ambientales',
+  '78':'Servicios de Transporte, Almacenamiento y Correo',
+  '80':'Servicios de Gestion, Profesionales de Negocios y Administrativos',
+  '81':'Servicios de Ingenieria, Investigacion y Tecnologia',
+  '82':'Servicios Editoriales, de Diseno, Graficos y de Bellas Artes',
+  '83':'Servicios Publicos y del Sector Publico',
+  '84':'Servicios Financieros y de Seguros',
+  '85':'Servicios de Salud',
+  '86':'Servicios de Educacion y Capacitacion',
+  '90':'Servicios de Viajes, Alimentacion, Alojamiento y Entretenimiento',
+  '91':'Servicios Personales y Domesticos',
+  '92':'Servicios de Defensa Nacional, Orden Publico y Seguridad',
+  '93':'Servicios de Politica y Asuntos Civicos',
+  '94':'Organizaciones y Clubes',
+  '95':'Terrenos, Edificios, Estructuras y Vias'
+};
+async function cargarTendenciaPrecios(){
+  const empty=document.getElementById('tendenciaEmpty'), canvas=document.getElementById('chartTendencia'), sel=document.getElementById('segmentoTendencia');
+  const {data,error}=await supabaseClient.from('vista_tendencia_segmento').select('*');
+  if(error){
+    console.error('vista_tendencia_segmento:',error.message);
+    canvas.classList.add('hidden'); empty.classList.remove('hidden');
+    empty.textContent='No fue posible cargar la tendencia de precios: '+error.message+' (verifique que la vista vista_tendencia_segmento exista en Supabase, con permiso GRANT SELECT a authenticated).';
+    return;
+  }
+  tendenciaData=data||[];
+  if(tendenciaData.length===0){
+    canvas.classList.add('hidden'); empty.classList.remove('hidden');
+    empty.textContent='La vista vista_tendencia_segmento existe pero no devolvio filas todavia.';
+    sel.innerHTML=''; return;
+  }
+  const totalesPorSegmento={};
+  tendenciaData.forEach(r=>{totalesPorSegmento[r.segmento]=(totalesPorSegmento[r.segmento]||0)+Number(r.total_observaciones||0);});
+  const segmentos=Object.keys(totalesPorSegmento).sort((a,b)=>totalesPorSegmento[b]-totalesPorSegmento[a]);
+  sel.innerHTML=segmentos.map(s=>`<option value="${s}">${s} - ${SEGMENTOS_UNSPSC[s]||'(segmento sin nombre registrado)'} (${totalesPorSegmento[s].toLocaleString('es-PA')} obs.)</option>`).join('');
+  renderTendenciaChart();
+}
+function renderTendenciaChart(){
+  const segmento=document.getElementById('segmentoTendencia').value;
+  const filas=tendenciaData.filter(r=>r.segmento===segmento);
+  const periodos=[...new Set(filas.map(r=>r.periodo))].sort();
+  const empty=document.getElementById('tendenciaEmpty'), canvas=document.getElementById('chartTendencia');
+  if(periodos.length<2){empty.textContent='Aun no hay suficiente historial mensual para esta categoria. A medida que se acumulen mas meses de datos, esta grafica se ira poblando.';empty.classList.remove('hidden');canvas.classList.add('hidden');return;}
+  empty.classList.add('hidden');canvas.classList.remove('hidden');
+  const serieAdj=periodos.map(p=>{const f=filas.find(r=>r.periodo===p&&r.tipo_dato==='adjudicado');return f?Number(f.precio_promedio_ponderado):null;});
+  
+  if(chartTendencia) chartTendencia.destroy();
+  requestAnimationFrame(()=>{
+  chartTendencia=new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{labels:periodos,datasets:[
+      {label:'Adjudicado (compra real)',data:serieAdj,borderColor:'#1d4ed8',backgroundColor:'#1d4ed822',tension:.25,spanGaps:true}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${money(ctx.parsed.y)}`}}},scales:{y:{ticks:{callback:v=>money(v)}}}}
+  });
+  });
+}
+
+/* ============================================================
+   RANKING DE VOLATILIDAD DE PRECIOS
+   ============================================================ */
+async function cargarVolatilidad(){
+  const load=document.getElementById('volatilidadLoading'), wrap=document.getElementById('volatilidadWrap'), body=document.getElementById('volatilidadBody');
+  load.classList.remove('hidden'); wrap.classList.add('hidden');
+  try{
+    // PASO 1: Traer los 15 ítems con mayor volatilidad (sin JOIN, sin filtro por activo)
+    const {data:volData,error:volError}=await supabaseClient
+      .from('vista_volatilidad_precios')
+      .select('id_item,precio_minimo,precio_promedio,precio_maximo,variacion_pct')
+      .order('variacion_pct',{ascending:false})
+      .limit(50); // Traemos más de 15 para poder filtrar por activo después
+    if(volError) throw volError;
+
+    const volItems = volData || [];
+    if(!volItems.length){
+      body.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-sm text-slate-400">Aún no hay suficientes datos para este ranking.</td></tr>`;
+      return;
+    }
+
+    // PASO 2: Traer los detalles del catálogo para esos ítems
+    const ids = volItems.map(r => r.id_item);
+    const {data:catData, error:catError} = await supabaseClient
+      .from('catalogo_bienes_servicios')
+      .select('id_item,descripcion_item,activo')
+      .in('id_item', ids);
+    if(catError) throw catError;
+
+    // Crear un diccionario para búsqueda rápida
+    const catalogoPorId = {};
+    (catData || []).forEach(c => { catalogoPorId[c.id_item] = c; });
+
+    // PASO 3: Cruzar y quedarnos solo con los que están activos
+    const items = volItems
+      .map(v => ({ ...v, catalogo: catalogoPorId[v.id_item] }))
+      .filter(x => x.catalogo && x.catalogo.activo === true)
+      .slice(0, 15);
+
+    if(!items.length){
+      body.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-sm text-slate-400">No hay ítems activos en el ranking de volatilidad.</td></tr>`;
+      return;
+    }
+
+    // PASO 4: Traer el histórico para la sparkline
+    const idsFinales = items.map(r => r.id_item);
+    let historial = {};
+    if(idsFinales.length){
+      const {data:hist} = await supabaseClient
+        .from('historico_precios_mensual')
+        .select('id_item,periodo,precio_promedio')
+        .eq('tipo_dato','adjudicado')
+        .in('id_item', idsFinales)
+        .order('periodo');
+      (hist||[]).forEach(h => {
+        (historial[h.id_item] = historial[h.id_item] || []).push(Number(h.precio_promedio));
+      });
+    }
+
+    // PASO 5: Renderizar
+    body.innerHTML = items.map(r => `<tr>
+      <td class="py-2.5 px-4 max-w-xs truncate" title="${esc(r.catalogo.descripcion_item)}">${esc(r.catalogo.descripcion_item)}</td>
+      <td class="py-2.5 px-4 text-right font-mono text-xs">${money(r.precio_minimo)}</td>
+      <td class="py-2.5 px-4 text-right font-mono text-xs font-semibold">${money(r.precio_promedio)}</td>
+      <td class="py-2.5 px-4 text-right font-mono text-xs">${money(r.precio_maximo)}</td>
+      <td class="py-2.5 px-4 text-right font-bold text-amber-600">${r.variacion_pct ?? '—'}%</td>
+      <td class="py-2.5 px-4 text-center">${sparkline(historial[r.id_item] || [])}</td>
+    </tr>`).join('');
+
+  } catch(e) {
+    console.error(e);
+    body.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-sm text-red-500">Error: ${esc(e.message)}</td></tr>`;
+  } finally {
+    load.classList.add('hidden');
+    wrap.classList.remove('hidden');
+  }
+}
+function sparkline(valores){
+  if(valores.length<2) return '<span class="text-xs text-slate-300">—</span>';
+  const w=80,h=24,min=Math.min(...valores),max=Math.max(...valores),rango=(max-min)||1;
+  const pts=valores.map((v,i)=>`${(i/(valores.length-1)*w).toFixed(1)},${(h-((v-min)/rango*h)).toFixed(1)}`).join(' ');
+  return `<svg width="${w}" height="${h}" class="inline-block"><polyline points="${pts}" fill="none" stroke="#1d4ed8" stroke-width="1.5"/></svg>`;
+}
+
+function setQuality(name,n,total){
+  const pct=total?n/total*100:0;
+  document.getElementById('quality'+name).textContent=pct.toFixed(1)+'%';
+  document.getElementById('quality'+name+'Bar').style.width=pct+'%';
+}
+
+/* ============================================================
+   FILTROS / CATÁLOGO
+   ============================================================ */
+function aplicarFiltros(){paginaActual=0;cargarDatosCatalogo();}
+function limpiarFiltros(){
+  ['searchBox','filtroUnspscExacto'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('filtroObjetoGasto').value='';
+  document.getElementById('filtroUnidad').value='';
+  document.getElementById('filtroActivo').value='activos';
+  paginaActual=0; sortColumn='id_item';sortForeignTable=null;sortAscending=true;cargarDatosCatalogo();
+}
+function toggleSort(column,foreignTable=null){
+  if(sortColumn===column&&sortForeignTable===foreignTable)sortAscending=!sortAscending;
+  else{sortColumn=column;sortForeignTable=foreignTable;sortAscending=true;}
+  paginaActual=0;cargarDatosCatalogo();
+}
+document.getElementById('searchBox').addEventListener('keydown',e=>{if(e.key==='Enter')aplicarFiltros()});
+document.getElementById('filtroUnspscExacto').addEventListener('keydown',e=>{if(e.key==='Enter')aplicarFiltros()});
+
+async function cargarDatosCatalogo(){
+  const loading=document.getElementById('loadingIndicator'), container=document.getElementById('tableContainer'), empty=document.getElementById('emptyMessage');
+  loading.classList.remove('hidden');container.classList.add('hidden');empty.classList.add('hidden');
+  try{
+    let q=supabaseClient.from('catalogo_bienes_servicios').select(`
+      id_item,descripcion_item,codigo_unspsc,unspsc_descripcion,unidad_id,codigo_objeto_gasto,activo,
+      num_observaciones,precio_min_observado,precio_promedio_observado,precio_max_observado,
+      unidades_medida(nombre),objeto_gasto(descripcion)
+    `,{count:'estimated'});
+    const estado=document.getElementById('filtroActivo').value;
+    if(estado==='activos')q=q.eq('activo',true);else if(estado==='inactivos')q=q.eq('activo',false);
+    const og=document.getElementById('filtroObjetoGasto').value;if(og)q=q.eq('codigo_objeto_gasto',og);
+    const un=document.getElementById('filtroUnidad').value;if(un)q=q.eq('unidad_id',un);
+    const code=document.getElementById('filtroUnspscExacto').value.trim();if(code)q=q.ilike('codigo_unspsc',code+'%');
+    const text=document.getElementById('searchBox').value.trim();if(text)q=q.textSearch('busqueda',text,{type:'websearch',config:'spanish'});
+    const opts={ascending:sortAscending,nullsFirst:false};if(sortForeignTable)opts.foreignTable=sortForeignTable;
+    q=q.order(sortColumn,opts).range(paginaActual*PAGE_SIZE,paginaActual*PAGE_SIZE+PAGE_SIZE-1);
+    const {data,error,count}=await q;if(error)throw error;
+    totalCount=count??0;filaEnPantalla=data||[];renderizarTabla(filaEnPantalla);actualizarPaginacion();actualizarFlechasOrden();
+  }catch(e){console.error(e);toast('Error al consultar el catálogo: '+e.message,'error');}
+  finally{loading.classList.add('hidden');}
+}
+function actualizarFlechasOrden(){
+  document.querySelectorAll('[id^="arrow_"]').forEach(x=>x.textContent='');
+  const el=document.getElementById('arrow_'+sortColumn);if(el)el.textContent=sortAscending?' ▲':' ▼';
+}
+function botonPag(iconName,dest,disabled,title){
+  return disabled?`<span class="px-2 py-1 text-slate-300"><i data-lucide="${iconName}" class="w-4 h-4"></i></span>`:`<button onclick="irAPagina(${dest})" title="${title}" class="px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800"><i data-lucide="${iconName}" class="w-4 h-4"></i></button>`;
+}
+function actualizarPaginacion(){
+  const start=totalCount?paginaActual*PAGE_SIZE+1:0,end=Math.min((paginaActual+1)*PAGE_SIZE,totalCount);
+  document.getElementById('resultCount').textContent=`${start.toLocaleString('es-PA')}-${end.toLocaleString('es-PA')} de ${totalCount.toLocaleString('es-PA')}`;
+  const pages=Math.max(1,Math.ceil(totalCount/PAGE_SIZE)),cur=paginaActual+1;
+  let a=Math.max(1,cur-4),b=Math.min(pages,a+8);a=Math.max(1,b-8);
+  let h=botonPag('chevrons-left',0,cur===1,'Primera página')+botonPag('chevron-left',paginaActual,cur===1,'Página anterior');
+  for(let p=a;p<=b;p++)h+=`<button onclick="irAPagina(${p-1})" class="px-2.5 py-1 rounded ${p===cur?'bg-brand-700 text-white':'hover:bg-slate-100 dark:hover:bg-slate-800'}">${p}</button>`;
+  h+=botonPag('chevron-right',paginaActual+1,cur===pages,'Página siguiente')+botonPag('chevrons-right',pages-1,cur===pages,'Última página');
+  document.getElementById('paginacionTop').innerHTML=h;document.getElementById('paginacionBottom').innerHTML=h;
+  lucide.createIcons();
+}
+function irAPagina(p){paginaActual=Math.max(0,p);cargarDatosCatalogo();}
+
+function renderizarTabla(items){
+  const tbody=document.getElementById('catalogoTableBody'),container=document.getElementById('tableContainer'),empty=document.getElementById('emptyMessage');
+  tbody.innerHTML='';
+  if(!items.length){empty.classList.remove('hidden');return;}
+  items.forEach(item=>{
+    const tr=document.createElement('tr');tr.className='hover:bg-slate-50 dark:hover:bg-slate-800/50';
+    let actions=`<button onclick="verDetalle(${item.id_item})" class="table-action text-brand-700 dark:text-blue-300" title="Ver ficha"><i data-lucide="eye"></i></button>`;
+    actions+=`<button onclick="copiarItem(${item.id_item})" class="table-action" title="Copiar"><i data-lucide="copy"></i></button>`;
+    if(canEdit())actions+=`<button onclick="abrirModalEditar(${item.id_item})" class="table-action text-blue-600" title="Editar"><i data-lucide="pencil"></i></button>`;
+    if(canEdit())actions+=`<button onclick="toggleActivo(${item.id_item},${!!item.activo})" class="table-action text-amber-600" title="${item.activo?'Desactivar':'Reactivar'}"><i data-lucide="${item.activo?'archive':'archive-restore'}"></i></button>`;
+    if(canDelete())actions+=`<button onclick="borrarItem(${item.id_item})" class="table-action text-red-600" title="Eliminar"><i data-lucide="trash-2"></i></button>`;
+    const desc=item.descripcion_item||'Sin descripción';
+    const short=desc.length>70?desc.slice(0,70)+'…':desc;
+    tr.innerHTML=`
+      <td class="py-3 px-4 whitespace-nowrap sticky left-0 bg-white dark:bg-slate-900 z-10"><div class="flex gap-1">${actions}</div></td>
+      <td class="py-3 px-4 font-medium desc-cell" title="${esc(desc)}">${esc(short)}</td>
+      <td class="py-3 px-4 font-mono text-xs text-slate-500">${esc(item.codigo_unspsc||'—')}</td>
+      <td class="py-3 px-4 text-xs text-slate-500 max-w-xs">${esc(item.unspsc_descripcion||'—')}</td>
+      <td class="py-3 px-4">${esc(item.unidades_medida?.nombre||'—')}</td>
+      <td class="py-3 px-4 text-xs text-slate-500">${esc(item.objeto_gasto?.descripcion||'Sin clasificar')}</td>
+      <td class="py-3 px-4 text-center">${Number(item.num_observaciones||0).toLocaleString('es-PA')}</td>
+      <td class="py-3 px-4 text-right font-mono text-slate-500">${money(item.precio_min_observado)}</td>
+      <td class="py-3 px-4 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400">${money(item.precio_promedio_observado)}</td>
+      <td class="py-3 px-4 text-right font-mono text-slate-500">${money(item.precio_max_observado)}</td>
+      <td class="py-3 px-4 text-center">${item.activo?'<span class="status-active">Activo</span>':'<span class="status-inactive">Inactivo</span>'}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('tableContainer').classList.remove('hidden');
+  lucide.createIcons();
+}
+
+/* ============================================================
+   DETALLE / COPIAR (Con formato de periodo mm-aaaa)
+   ============================================================ */
+async function verDetalle(idItem) {
+  const modal = document.getElementById('detailModal');
+  const titleEl = document.getElementById('detailTitle');
+  const bodyEl = document.getElementById('detailBody');
+  
+  titleEl.textContent = 'Cargando detalles...';
+  bodyEl.innerHTML = '<div class="text-center py-10"><i data-lucide="loader-circle" class="animate-spin w-8 h-8 mx-auto text-brand-600"></i></div>';
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  lucide.createIcons();
+
+  try {
+    const { data: item, error } = await supabaseClient
+      .from('catalogo_bienes_servicios')
+      .select(`
+        *,
+        unidades_medida(nombre),
+        objeto_gasto(descripcion, capitulo, concepto)
+      `)
+      .eq('id_item', idItem)
+      .single();
+
+    if (error) throw error;
+
+    const { data: historicos, error: errHist } = await supabaseClient
+      .from('historico_precios_mensual')
+      .select('*')
+      .eq('id_item', idItem)
+      .order('periodo', { ascending: true });
+
+    if (errHist) console.warn('No se pudo cargar el histórico:', errHist.message);
+
+    titleEl.textContent = item.descripcion_item;
+
+    let historicoHtml = `
+      <div class="mt-6">
+        <h4 class="font-semibold text-sm mb-3 flex items-center gap-2"><i data-lucide="trending-up" class="w-4 h-4 text-brand-600"></i> Histórico de precios mensual</h4>
+    `;
+
+    if (!historicos || historicos.length === 0) {
+      historicoHtml += `<p class="text-xs text-slate-400 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">No hay registros de precios históricos mensuales para este ítem.</p>`;
+    } else {
+      historicoHtml += `
+        <div class="overflow-auto max-h-64 scroll-thin border border-slate-200 dark:border-slate-800 rounded-lg">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0 text-slate-600 dark:text-slate-300">
+              <tr>
+                <th class="p-2.5 font-semibold">Periodo (mm-aaaa)</th>
+                <th class="p-2.5 font-semibold text-center">N° de Compras</th>
+                <th class="p-2.5 font-semibold text-right">Mínimo</th>
+                <th class="p-2.5 font-semibold text-right">Promedio</th>
+                <th class="p-2.5 font-semibold text-right">Máximo</th>
+                <th class="p-2.5 font-semibold text-right">Total Adquirido</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
+      `;
+      historicos.forEach(h => {
+        // Conversión del formato de periodo de aaaa-mm a mm-aaaa si viene en formato estándar
+        let periodoStr = String(h.periodo || '');
+        if (/^\d{4}-\d{2}$/.test(periodoStr)) {
+          const partes = periodoStr.split('-');
+          periodoStr = `${partes[1]}-${partes[0]}`;
+        }
+
+        historicoHtml += `
+          <tr>
+            <td class="p-2.5">${esc(periodoStr)}</td>
+            <td class="p-2.5 text-center font-sans">${Number(h.num_obs || 0).toLocaleString('es-PA')}</td>
+            <td class="p-2.5 text-right text-slate-500">${money(h.precio_min)}</td>
+            <td class="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400">${money(h.precio_promedio)}</td>
+            <td class="p-2.5 text-right text-slate-500">${money(h.precio_max)}</td>
+            <td class="p-2.5 text-right font-sans">${h.cantidad_total !== null ? Number(h.cantidad_total).toLocaleString('es-PA') : '—'}</td>
+          </tr>
+        `;
+      });
+      historicoHtml += `</tbody></table></div>`;
+    }
+    historicoHtml += `</div>`;
+
+    bodyEl.innerHTML = `
+      <div class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+            <span class="text-[11px] font-bold text-slate-400 uppercase">Código UNSPSC</span>
+            <div class="font-mono text-sm font-semibold mt-1">${esc(item.codigo_unspsc || 'No asignado')}</div>
+            <div class="text-xs text-slate-500 truncate mt-0.5">${esc(item.unspsc_descripcion || '')}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+            <span class="text-[11px] font-bold text-slate-400 uppercase">Unidad de medida</span>
+            <div class="text-sm font-semibold mt-1">${esc(item.unidades_medida?.nombre || 'No definida')}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+            <span class="text-[11px] font-bold text-slate-400 uppercase">Estado</span>
+            <div class="text-sm font-semibold mt-1">
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-bold ${item.activo ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'}">
+                <span class="w-1.5 h-1.5 rounded-full ${item.activo ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
+                ${item.activo ? 'Activo' : 'Inactivo'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+          <span class="text-[11px] font-bold text-slate-400 uppercase">Objeto del Gasto</span>
+          <div class="text-sm font-semibold mt-1">${esc(item.codigo_objeto_gasto || '')} — ${esc(item.objeto_gasto?.descripcion || 'Sin clasificar')}</div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-center">
+          <div class="p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
+            <span class="text-[10px] font-bold text-blue-600 uppercase">N° de Compras</span>
+            <div class="text-lg font-bold mt-1">${Number(item.num_observaciones || 0).toLocaleString('es-PA')}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Precio Mínimo</span>
+            <div class="text-sm font-mono font-semibold mt-1">${money(item.precio_min_observado)}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40">
+            <span class="text-[10px] font-bold text-emerald-600 uppercase">Precio Promedio</span>
+            <div class="text-sm font-mono font-bold text-emerald-700 dark:text-emerald-400 mt-1">${money(item.precio_promedio_observado)}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Precio Máximo</span>
+            <div class="text-sm font-mono font-semibold mt-1">${money(item.precio_max_observado)}</div>
+          </div>
+        </div>
+
+        ${historicoHtml}
+      </div>
+    `;
+    lucide.createIcons();
+  } catch (err) {
+    console.error(err);
+    bodyEl.innerHTML = `<p class="text-sm text-red-600 p-4">Error al cargar la ficha: ${esc(err.message)}</p>`;
+  }
+}
+
+function cerrarDetalle() {
+  const modal = document.getElementById('detailModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+async function copiarItem(id){
+  const i=filaEnPantalla.find(x=>x.id_item===id);if(!i)return;
+  const text=`${i.descripcion_item||''} | UNSPSC: ${i.codigo_unspsc||'—'} | Unidad: ${i.unidades_medida?.nombre||'—'} | Precio promedio: ${money(i.precio_promedio_observado)}`;
+  try{await navigator.clipboard.writeText(text);toast('Ítem copiado al portapapeles.','success')}catch(e){toast('No fue posible copiar al portapapeles.','error')}
+}
+
+/* ============================================================
+   CRUD
+   ============================================================ */
+function abrirModalAgregar(){
+  if(!canEdit()){toast('Su rol no permite agregar registros.','warning');return;}
+  document.getElementById('modalTitle').textContent='Agregar ítem';document.getElementById('modalEyebrow').textContent='Nuevo registro';
+  document.getElementById('itemForm').reset();document.getElementById('itemId').value='';document.getElementById('itemActivo').checked=true;
+  document.getElementById('itemFormError').classList.add('hidden');document.getElementById('itemModal').classList.remove('hidden');document.getElementById('itemModal').classList.add('flex');
+}
+function abrirModalEditar(id){
+  if(!canEdit()){toast('Su rol no permite editar registros.','warning');return;}
+  const i=filaEnPantalla.find(x=>x.id_item===id);if(!i)return;
+  document.getElementById('modalTitle').textContent='Editar ítem #'+id;document.getElementById('modalEyebrow').textContent='Modificar registro';
+  document.getElementById('itemId').value=id;document.getElementById('itemDescripcion').value=i.descripcion_item||'';document.getElementById('itemUnspsc').value=i.codigo_unspsc||'';
+  document.getElementById('itemUnidad').value=i.unidad_id||'';document.getElementById('itemObjetoGasto').value=i.codigo_objeto_gasto||'';document.getElementById('itemActivo').checked=!!i.activo;
+  document.getElementById('itemFormError').classList.add('hidden');document.getElementById('itemModal').classList.remove('hidden');document.getElementById('itemModal').classList.add('flex');
+}
+function cerrarModal(){document.getElementById('itemModal').classList.add('hidden');document.getElementById('itemModal').classList.remove('flex')}
+document.getElementById('itemForm').addEventListener('submit',async e=>{
+  e.preventDefault();if(!canEdit())return;
+  const id=document.getElementById('itemId').value,err=document.getElementById('itemFormError');err.classList.add('hidden');
+  const descripcion=document.getElementById('itemDescripcion').value.trim();
+  if(descripcion.length<5){err.textContent='La descripción debe tener al menos 5 caracteres.';err.classList.remove('hidden');return;}
+  const payload={descripcion_item:descripcion,codigo_unspsc:document.getElementById('itemUnspsc').value.trim()||null,unidad_id:document.getElementById('itemUnidad').value||null,codigo_objeto_gasto:document.getElementById('itemObjetoGasto').value||null,activo:document.getElementById('itemActivo').checked};
+  try{
+    const result=id?await supabaseClient.from('catalogo_bienes_servicios').update(payload).eq('id_item',id):await supabaseClient.from('catalogo_bienes_servicios').insert(payload);
+    if(result.error)throw result.error;
+    cerrarModal();toast(id?'Ítem actualizado correctamente.':'Ítem agregado correctamente.','success');dashboardLoaded=false;cargarDatosCatalogo();
+  }catch(x){err.textContent='Error al guardar: '+x.message;err.classList.remove('hidden');}
+});
+async function toggleActivo(id, actual) {
+  if (!canEdit()) return;
+
+  if (actual) {
+    // Buscar la descripción del ítem en la página actual para mostrarla en el modal
+    const item = filaEnPantalla.find(x => x.id_item === id);
+    const motivo = await pedirMotivoBaja(item?.descripcion_item);
+    if (!motivo) return; // usuario canceló
+
+    const { error } = await supabaseClient
+      .from('catalogo_bienes_servicios')
+      .update({ activo: false, motivo_baja: motivo })
+      .eq('id_item', id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+  } else {
+    const { error } = await supabaseClient
+      .from('catalogo_bienes_servicios')
+      .update({ activo: true })
+      .eq('id_item', id);
+    if (error) { toast('Error: ' + error.message, 'error'); return; }
+  }
+
+  toast(actual ? 'Ítem desactivado.' : 'Ítem reactivado.', 'success');
+  dashboardLoaded = false;
+  cargarDatosCatalogo();
+}
+function confirmar(title, text, tipo = 'danger') {
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmText').textContent = text;
+
+    // Ajustar color/estilo del botón de confirmación según el tipo
+    const btnOk = document.querySelector('#confirmModal button.btn-danger, #confirmModal button.btn-primary');
+    if (btnOk) {
+      btnOk.classList.remove('btn-danger', 'btn-primary');
+      btnOk.classList.add(tipo === 'primary' ? 'btn-primary' : 'btn-danger');
+    }
+
+    // Ajustar icono y color del círculo superior
+    const iconWrap = document.querySelector('#confirmModal > div > div:first-child');
+    if (iconWrap) {
+      iconWrap.classList.remove('bg-red-100','text-red-600','bg-blue-100','text-blue-600');
+      iconWrap.classList.add(
+        tipo === 'primary' ? 'bg-blue-100' : 'bg-red-100',
+        tipo === 'primary' ? 'text-blue-600' : 'text-red-600'
+      );
+      const icon = iconWrap.querySelector('i');
+      if (icon) {
+        icon.setAttribute('data-lucide', tipo === 'primary' ? 'info' : 'triangle-alert');
+        lucide.createIcons();
+      }
+    }
+
+    const m = document.getElementById('confirmModal');
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+  });
+}
+function resolverConfirmacion(ok){document.getElementById('confirmModal').classList.add('hidden');document.getElementById('confirmModal').classList.remove('flex');if(confirmResolver){confirmResolver(ok);confirmResolver=null}}
+
+/* ============================================================
+   MODAL DE MOTIVO DE BAJA (reemplaza prompt() nativo)
+   ============================================================ */
+let motivoBajaResolver = null;
+
+function pedirMotivoBaja(descripcion) {
+  return new Promise(resolve => {
+    motivoBajaResolver = resolve;
+
+    const itemEl = document.getElementById('motivoBajaItem');
+    itemEl.textContent = descripcion
+      ? 'Está por dar de baja el bien o servicio: ' + (descripcion.length > 90 ? descripcion.slice(0, 90) + '…' : descripcion)
+      : 'Está por dar de baja este bien o servicio.';
+
+    const txt = document.getElementById('motivoBajaTexto');
+    txt.value = '';
+    document.getElementById('motivoBajaError').classList.add('hidden');
+
+    const m = document.getElementById('motivoBajaModal');
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+
+    setTimeout(() => txt.focus(), 50);
+    lucide.createIcons();
+  });
+}
+
+function resolverMotivoBaja(valor) {
+  const m = document.getElementById('motivoBajaModal');
+
+  if (valor === '__submit__') {
+    const txt = document.getElementById('motivoBajaTexto').value.trim();
+    if (txt.length < 5) {
+      document.getElementById('motivoBajaError').classList.remove('hidden');
+      document.getElementById('motivoBajaTexto').focus();
+      return;
+    }
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+    if (motivoBajaResolver) { const r = motivoBajaResolver; motivoBajaResolver = null; r(txt); }
+    return;
+  }
+
+  m.classList.add('hidden');
+  m.classList.remove('flex');
+  if (motivoBajaResolver) { const r = motivoBajaResolver; motivoBajaResolver = null; r(null); }
+}
+
+async function borrarItem(id) {
+  if (!canDelete()) return;
+
+  // Buscar el ítem en la página actual para mostrar su descripción
+  const item = filaEnPantalla.find(x => x.id_item === id);
+  const descripcion = item?.descripcion_item || '';
+  const descCorta = descripcion.length > 90 ? descripcion.slice(0, 90) + '…' : descripcion;
+
+  const ok = await confirmar(
+    'Eliminar definitivamente...',
+    descCorta
+      ? `Esta acción eliminará el bien o servicio: "${descCorta}". Esta acción NO se puede deshacer. ¿Desea continuar?`
+      : `Esta acción eliminará el registro #${id}. Esta acción NO se puede deshacer. ¿Desea continuar?`
+  );
+  if (!ok) return;
+
+  const { error } = await supabaseClient
+    .from('catalogo_bienes_servicios')
+    .delete()
+    .eq('id_item', id);
+
+  if (error) { toast('No fue posible eliminar: ' + error.message, 'error'); return; }
+  toast('Registro eliminado.', 'success');
+  dashboardLoaded = false;
+  cargarDatosCatalogo();
+}
+
+/* ============================================================
+   EXPORTACIONES
+   ============================================================ */
+function filasParaExportar(){return filaEnPantalla.map(i=>({
+  id_item:i.id_item,descripcion:i.descripcion_item||'',codigo_unspsc:i.codigo_unspsc||'',descripcion_unspsc:i.unspsc_descripcion||'',
+  unidad:i.unidades_medida?.nombre||'',objeto_gasto:i.objeto_gasto?.descripcion||'',num_compras:i.num_observaciones||0,
+  precio_min:i.precio_min_observado??'',precio_promedio:i.precio_promedio_observado??'',precio_max:i.precio_max_observado??'',estado:i.activo?'Activo':'Inactivo'
+}))}
+
+function validarFilasExport() {
+  const rows = filasParaExportar();
+  if (!rows.length) { toast('No hay datos para exportar.', 'warning'); return null; }
+  return rows;
+}
+
+function exportarCSV(){
+  const rows = validarFilasExport();
+  if (!rows) return;
+  const h=Object.keys(rows[0]),csv='\ufeff'+[h.join(';'),...rows.map(r=>h.map(k=>`"${String(r[k]).replace(/"/g,'""')}"`).join(';'))].join('\r\n');
+  descargarBlob(csv,'catalogo_pagina_'+(paginaActual+1)+'.csv','text/csv;charset=utf-8');
+}
+function exportarExcel(){
+  const rows = validarFilasExport();
+  if (!rows) return;
+  const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Catalogo');XLSX.writeFile(wb,'catalogo_pagina_'+(paginaActual+1)+'.xlsx');
+}
+function exportarPDF(){
+  const rows = validarFilasExport();
+  if (!rows) return;
+  const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'landscape'});
+  doc.setFontSize(14);doc.text('Catálogo de Bienes y Servicios',14,12);doc.setFontSize(8);doc.text('Página '+(paginaActual+1)+' — '+new Date().toLocaleDateString('es-PA'),14,17);
+  doc.autoTable({startY:21,head:[['Descripción','UNSPSC','Unidad','Objeto','N° Compras','Mín.','Prom.','Máx.','Estado']],body:rows.map(r=>[r.descripcion,r.codigo_unspsc,r.unidad,r.objeto_gasto,r.num_compras,r.precio_min,r.precio_promedio,r.precio_max,r.estado]),styles:{fontSize:6},headStyles:{fillColor:[30,64,175]}});
+  doc.save('catalogo_pagina_'+(paginaActual+1)+'.pdf');
+}
+function descargarBlob(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),500)}
+
+/* ============================================================
+   COMPARACIÓN
+   ============================================================ */
+async function buscarParaComparar(){
+  const term=document.getElementById('compareSearch').value.trim();if(term.length<2){toast('Escriba al menos 2 caracteres.','warning');return;}
+  try{
+    let q=supabaseClient.from('catalogo_bienes_servicios').select('id_item,descripcion_item,codigo_unspsc,activo,precio_min_observado,precio_promedio_observado,precio_max_observado,unidades_medida(nombre),objeto_gasto(descripcion)').eq('activo',true).limit(10);
+    let result=await q.textSearch('busqueda',term,{type:'websearch',config:'spanish'});
+    if(result.error) result=await supabaseClient.from('catalogo_bienes_servicios').select('id_item,descripcion_item,codigo_unspsc,activo,precio_min_observado,precio_promedio_observado,precio_max_observado,unidades_medida(nombre),objeto_gasto(descripcion)').eq('activo',true).or(`descripcion_item.ilike.%${term.replace(/[%_]/g,'')}%,codigo_unspsc.ilike.%${term.replace(/[%_]/g,'')}%`).limit(10);
+    if(result.error)throw result.error;
+    const list=result.data||[];document.getElementById('compareResults').classList.toggle('hidden',!list.length);document.getElementById('compareEmpty').classList.toggle('hidden',!!list.length);
+    document.getElementById('compareResultList').innerHTML=list.map(i=>`<label class="flex items-center gap-3 p-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"><input type="checkbox" onchange="seleccionarComparacion(${i.id_item},this.checked)" ${compareItems.some(x=>x.id_item===i.id_item)?'checked':''} class="w-4 h-4"><span class="flex-1"><strong class="text-sm">${esc(i.descripcion_item)}</strong><small class="block text-xs text-slate-400">${esc(i.codigo_unspsc||'—')} · Prom. ${money(i.precio_promedio_observado)}</small></span></label>`).join('');
+  }catch(e){toast('Error en la búsqueda: '+e.message,'error')}
+}
+function seleccionarComparacion(id,checked){
+  if(checked){
+    if(compareItems.length>=6){toast('Puede comparar hasta 6 registros.','warning');buscarParaComparar();return;}
+    obtenerItemComparacion(id);
+  }else{compareItems=compareItems.filter(x=>x.id_item!==id);renderComparacion();}
+}
+async function obtenerItemComparacion(id){
+  const {data,error}=await supabaseClient.from('catalogo_bienes_servicios').select('id_item,descripcion_item,codigo_unspsc,activo,precio_min_observado,precio_promedio_observado,precio_max_observado,unidades_medida(nombre),objeto_gasto(descripcion)').eq('id_item',id).single();
+  if(!error&&data&&!compareItems.some(x=>x.id_item===id)){compareItems.push(data);renderComparacion();}
+}
+function renderComparacion(){
+  const wrap=document.getElementById('comparisonTableWrap');
+  if(!compareItems.length){wrap.classList.add('hidden');return;}
+  wrap.classList.remove('hidden');
+  const fields=[['Descripción','descripcion_item'],['UNSPSC','codigo_unspsc'],['Unidad','_unidad'],['Objeto del gasto','_objeto'],['Precio mínimo','precio_min_observado'],['Precio promedio','precio_promedio_observado'],['Precio máximo','precio_max_observado'],['N° de Compras','num_observaciones']];
+  wrap.innerHTML=`<div class="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between"><strong>Comparación (${compareItems.length})</strong><button onclick="compareItems=[];renderComparacion();buscarParaComparar()" class="text-xs text-red-600">Limpiar selección</button></div><table class="w-full min-w-[700px] text-sm"><tbody>${fields.map(([label,key])=>`<tr class="border-b border-slate-200 dark:border-slate-800"><th class="p-3 text-left bg-slate-50 dark:bg-slate-800/60 w-44 text-xs text-slate-500">${label}</th>${compareItems.map(i=>`<td class="p-3 align-top">${esc(key==='_unidad'?i.unidades_medida?.nombre:key==='_objeto'?i.objeto_gasto?.descripcion:key.includes('precio')?money(i[key]):i[key]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+/* ============================================================
+   ADMINISTRACIÓN DE PERFILES
+   ============================================================ */
+/* ============================================================
+   UTILIDADES DE MODALES Y BOTONES
+   ============================================================ */
+
+// Alterna la visibilidad de una contraseña dado el id del input y del icono
+function toggleVerPasswordId(inputId, iconId) {
+  const input = document.getElementById(inputId);
+  const icon  = document.getElementById(iconId);
+  if (!input || !icon) return;
+  const boton = icon.closest('button');
+  const visible = input.type === 'text';
+  input.type = visible ? 'password' : 'text';
+  icon.setAttribute('data-lucide', visible ? 'eye' : 'eye-off');
+  if (boton) boton.title = visible ? 'Mostrar contraseña' : 'Ocultar contraseña';
+  lucide.createIcons();
+}
+
+// Pone un botón en estado "cargando" mientras se procesa algo
+function setBotonCargando(btnId, textId, cargando, textoOriginal) {
+  const btn  = document.getElementById(btnId);
+  const span = document.getElementById(textId);
+  if (!btn) return;
+  btn.disabled = cargando;
+  btn.classList.toggle('opacity-60', cargando);
+  btn.classList.toggle('cursor-not-allowed', cargando);
+  if (span) span.textContent = cargando ? 'Procesando…' : textoOriginal;
+  const icon = btn.querySelector('i, svg');
+  if (icon && cargando) {
+    icon.setAttribute('data-lucide', 'loader-circle');
+    icon.classList.add('animate-spin');
+    lucide.createIcons();
+  } else if (icon) {
+    icon.classList.remove('animate-spin');
+  }
+}
+
+async function cargarUsuarios() {
+  if (currentRole !== 'administrador') return;
+  const load = document.getElementById('usersLoading');
+  const wrap = document.getElementById('usersTableWrap');
+  const body = document.getElementById('usersTableBody');
+  load.classList.remove('hidden');
+  wrap.classList.add('hidden');
+
+  // Por seguridad no traemos 'id'; usamos 'correo' como clave única.
+  const { data, error } = await supabaseClient
+    .from('perfiles')
+    .select('correo, rol')
+    .order('correo');
+
+  if (error) {
+    load.textContent = 'No fue posible consultar perfiles: ' + error.message;
+    return;
+  }
+
+  body.innerHTML = (data || []).map(u => {
+    const key = encodeURIComponent(u.correo || '');
+    return `
+      <tr>
+        <td class="p-3 font-medium">${esc(u.correo || '—')}</td>
+        <td class="p-3">
+          <select id="role_${key}" class="field max-w-44 py-1.5 text-xs">
+            <option value="lector"        ${u.rol === 'lector'        ? 'selected' : ''}>Lector</option>
+            <option value="editor"        ${u.rol === 'editor'        ? 'selected' : ''}>Editor</option>
+            <option value="administrador" ${u.rol === 'administrador' ? 'selected' : ''}>Administrador</option>
+          </select>
+        </td>
+        <td class="p-3">
+          <button onclick="guardarRolPorCorreo(decodeURIComponent('${key}'))"
+                  class="btn-primary text-xs py-1.5">
+            <i data-lucide="save"></i> Guardar
+          </button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  load.classList.add('hidden');
+  wrap.classList.remove('hidden');
+  lucide.createIcons();
+}
+
+async function guardarRolPorCorreo(correo) {
+  if (currentRole !== 'administrador') return;
+  const sel = document.getElementById('role_' + encodeURIComponent(correo));
+  if (!sel) return;
+  const rol = sel.value;
+  const ok = await confirmar('Cambiar rol o función',
+  `El usuario ${correo} pasará a tener el rol o función de «${roleLabel(rol)}». ¿Desea guardar el cambio?`,
+  'primary');
+  if (!ok) return;
+
+  const { error } = await supabaseClient
+    .from('perfiles')
+    .update({ rol })
+    .eq('correo', correo);
+
+  if (error) {
+    toast('No fue posible cambiar el rol: ' + error.message, 'error');
+    return;
+  }
+  toast('Rol actualizado.', 'success');
+  cargarUsuarios();
+}
+
+/* ============================================================
+   CREAR USUARIO (Edge Function: crear-usuario)
+   ============================================================ */
+
+function abrirModalCrearUsuario() {
+  if (currentRole !== 'administrador') {
+    toast('Solo administradores pueden crear usuarios.', 'warning');
+    return;
+  }
+  document.getElementById('createUserForm').reset();
+  document.getElementById('createUserError').classList.add('hidden');
+  const pwd = document.getElementById('newUserPassword');
+  const eye = document.getElementById('eyeIconNewUser');
+  pwd.type = 'password';
+  eye.setAttribute('data-lucide', 'eye');
+  lucide.createIcons();
+
+  const modal = document.getElementById('createUserModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  setTimeout(() => document.getElementById('newUserName').focus(), 50);
+}
+
+function cerrarModalCrearUsuario() {
+  const modal = document.getElementById('createUserModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function cerrarModalExitoCrearUsuario() {
+  const modal = document.getElementById('createUserSuccessModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  cargarUsuarios();
+}
+
+async function copiarCredencial(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast('Copiado al portapapeles.', 'success');
+  } catch (e) {
+    toast('No fue posible copiar. Seleccione y copie manualmente.', 'warning');
+    input.select();
+  }
+}
+
+document.getElementById('createUserForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (currentRole !== 'administrador') return;
+
+  const errEl = document.getElementById('createUserError');
+  const setErr = (msg) => {
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  };
+  errEl.classList.add('hidden');
+
+  const nombre   = document.getElementById('newUserName').value.trim();
+  const email    = document.getElementById('newUserEmail').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const rol      = document.getElementById('newUserRol').value;
+
+  if (!nombre)                             { setErr('Ingrese el nombre completo.'); return; }
+  if (nombre.length < 3)                   { setErr('El nombre debe tener al menos 3 caracteres.'); return; }
+  if (!email)                              { setErr('Ingrese el correo electrónico.'); return; }
+  if (!emailValido(email)) { setErr('El correo no tiene un formato válido.'); return; }
+  if (!password)                           { setErr('Ingrese una contraseña temporal.'); return; }
+  if (password.length < 8)                 { setErr('La contraseña debe tener al menos 8 caracteres.'); return; }
+  if (!['lector','editor','administrador'].includes(rol)) { setErr('Rol inválido.'); return; }
+
+  setBotonCargando('createUserSubmitBtn', 'createUserBtnText', true, 'Crear usuario');
+
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) throw new Error('No hay sesión activa.');
+
+    const response = await fetch(SUPABASE_EDGE_CREAR_USU, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + session.access_token,
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY
+    },
+    body: JSON.stringify({ email, password, rol, nombre })
+    });
+
+    const json = await response.json();
+
+    if (!response.ok || !json.success) {
+      throw new Error(json.error || 'Error desconocido al crear el usuario.');
+    }
+
+    cerrarModalCrearUsuario();
+
+    document.getElementById('successNombre').value   = nombre;
+    document.getElementById('successEmail').value    = json.usuario.correo;
+    document.getElementById('successPassword').value = json.usuario.password_temporal;
+    document.getElementById('successRol').textContent = roleLabel(json.usuario.rol);
+
+    const successModal = document.getElementById('createUserSuccessModal');
+    successModal.classList.remove('hidden');
+    successModal.classList.add('flex');
+    lucide.createIcons();
+
+  } catch (err) {
+    console.error('Error al crear usuario:', err);
+    setErr(err.message || 'Error inesperado.');
+  } finally {
+    setBotonCargando('createUserSubmitBtn', 'createUserBtnText', false, 'Crear usuario');
+  }
+});
+
+/* ============================================================
+   CARGA MASIVA
+   ============================================================ */
+function previsualizarCarga(){
+  const file=document.getElementById('bulkFile').files[0];if(!file){toast('Seleccione un archivo.','warning');return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'}),ws=wb.Sheets[wb.SheetNames[0]],rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(!rows.length){toast('El archivo está vacío.','warning');return;}
+      const preview=rows.slice(0,11),headers=preview[0],body=preview.slice(1);
+      document.getElementById('bulkPreview').classList.remove('hidden');
+      document.getElementById('bulkPreview').innerHTML=`<p class="text-xs text-slate-500 mb-2">Previsualización de las primeras ${body.length} filas. Esta versión no inserta datos.</p><table class="text-xs border-collapse"><thead><tr>${headers.map(h=>`<th class="border p-2 bg-slate-100 dark:bg-slate-800">${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${headers.map((_,i)=>`<td class="border p-2">${esc(r[i])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }catch(x){toast('No se pudo leer el archivo: '+x.message,'error')}
+  };reader.readAsArrayBuffer(file);
+}
+function limpiarCarga(){document.getElementById('bulkFile').value='';document.getElementById('bulkPreview').classList.add('hidden');}
+
+/* ============================================================
+   CIERRE POR ESC / ICONOS
+   ============================================================ */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    cerrarModal();
+    cerrarDetalle();
+    cerrarModalCrearUsuario();
+    cerrarModalExitoCrearUsuario();
+    if (!document.getElementById('confirmModal').classList.contains('hidden')) resolverConfirmacion(false);
+    if (!document.getElementById('motivoBajaModal').classList.contains('hidden')) resolverMotivoBaja(null);
+    return;
+  }
+
+  // D5: Enter confirma el modal de confirmación, salvo si el foco está en un <textarea>
+  if (e.key === 'Enter' && !document.getElementById('confirmModal').classList.contains('hidden')) {
+    const activo = document.activeElement;
+    if (activo && activo.tagName === 'TEXTAREA') return;
+    // Evitar que Enter dispare el submit de un form si lo hubiera
+    e.preventDefault();
+    resolverConfirmacion(true);
+  }
+});
+
+// Cierre por clic en el backdrop (solo si el clic fue sobre el backdrop, no sobre el contenido)
+['confirmModal', 'motivoBajaModal'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('click', ev => {
+    if (ev.target === el) {
+      if (id === 'confirmModal') resolverConfirmacion(false);
+      if (id === 'motivoBajaModal') resolverMotivoBaja(null);
+    }
+  });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  lucide.createIcons();
+});
+</script>
+</body>
+</html>
